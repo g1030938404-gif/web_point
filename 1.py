@@ -22,7 +22,8 @@ MAX_LOGS = 1000
 
 SHOP_ITEMS = {
     "台球券": 20, "网吧券": 20, "KTV券": 20,
-    "钓鱼券": 20, "麻将券": 30, "包夜券": 60
+    "钓鱼券": 20, "麻将券": 30, "包夜券": 60,
+    "不生气券":60,"和好券":200
 }
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
@@ -301,7 +302,6 @@ if st.sidebar.button("🚪 安全退出系统"):
 # =====================================================
 @st.fragment(run_every="3s")
 def render_live_system():
-    # 局部全局化变量，使得所有内部组件读写 Supabase 时完全对齐
     global data
     data = load_data() 
 
@@ -491,7 +491,7 @@ def render_live_system():
                     st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Tab 2 任务 (极速无感刷新区) ---
+    # --- Tab 2 任务 ---
     with tab2:
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.subheader("📋 申报完成事项")
@@ -548,7 +548,7 @@ def render_live_system():
             st.markdown(f"【{t['level']}级】**{t['title']}** (💰 {t['points']}分) —— *等待对方审核中...*")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Tab 3 悬赏 ---
+    # --- Tab 3 悬赏 (✨ 新增一键拒绝及清除机制) ---
     with tab3:
         c_pub, c_list = st.columns([1, 1.2])
         with c_pub:
@@ -569,12 +569,17 @@ def render_live_system():
             st.write("📜 **待我完成：**")
             if not my_b: st.caption("暂时没有悬赏哦")
             for b in my_b:
-                c_n, c_btn = st.columns([3, 2])
+                c_n, c_btn1, c_btn2 = st.columns([2.2, 1.5, 1.3])
                 with c_n: st.markdown(f"**{b['title']}** (💰 {b['points']})")
-                with c_btn:
+                with c_btn1:
                     if st.button("申请领赏", key=f"ap_{b['id']}"): 
                         b["status"] = "pending"
                         save_data(data)
+                        st.rerun()
+                with c_btn2:
+                    if st.button("拒绝", key=f"rej_b_{b['id']}"):
+                        b["status"] = "rejected" # 状态变更为 rejected，列表将直接过滤清除
+                        add_log(current_uid, f"拒绝了 {target_name} 的悬赏：{b['title']}", 0) # 自动追加入口日志
                         st.rerun()
             st.divider()
             
