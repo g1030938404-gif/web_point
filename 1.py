@@ -5,10 +5,10 @@ from datetime import datetime, timedelta
 from supabase import create_client, Client
 
 # =====================================================
-# Supabase 云数据库配置
+# Supabase 云数据库配置 (改为安全读取云端 Secrets 模式)
 # =====================================================
-SUPABASE_URL = "https://lodqyhfywibwlynheklf.supabase.co"
-SUPABASE_KEY = "sb_publishable_9gf_AODorGQuWiha5y9IqA__2ie4Ub_"
+SUPABASE_URL = st.secrets["SUPABASE_URL"]
+SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 
 @st.cache_resource
 def get_supabase_client() -> Client:
