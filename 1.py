@@ -259,7 +259,6 @@ if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
 if not st.session_state.logged_in_uid:
-    # 🚨 修复的关键在这里：加上了 st.markdown("""
     st.markdown("""
     <div class="login-container glass-card">
         <h2 style='text-align: center; color: #ff758c; margin-bottom: 10px;'>💌 积分系统</h2>
@@ -286,11 +285,23 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# ⏱️ ✨ 核心高频引擎：定义 3秒级自动刷新片段 (Fragment)
+# 🛡️ 架构核心隔离区：在 Fragment 外部渲染全局 st.sidebar
+# =====================================================
+current_uid = st.session_state.logged_in_uid
+global_current_name = data["accounts"][current_uid]["display_name"]
+
+st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
+st.sidebar.caption("于道各努力，千里自同风。")
+if st.sidebar.button("🚪 安全退出系统"):
+    st.session_state.logged_in_uid = None
+    st.rerun()
+
+# =====================================================
+# ⏱️ ✨ 核心高频引擎：定义 3秒级自动刷新片段 (仅限主页面容器)
 # =====================================================
 @st.fragment(run_every="3s")
 def render_live_system():
-    # 局部全局化变量，使得工具函数内能完美捕获到每3s刷新的最新快照
+    # 局部全局化变量，使得所有内部组件读写 Supabase 时完全对齐
     global data
     data = load_data() 
 
@@ -369,13 +380,6 @@ def render_live_system():
     def get_month_points(uid):
         now_prefix = f"**{datetime.now().strftime('%m-')}"
         return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
-
-    # 渲染侧边栏
-    st.sidebar.markdown(f"### 👋 欢迎，**{current_name}**")
-    st.sidebar.caption("于道各努力，千里自同风。")
-    if st.sidebar.button("🚪 安全退出系统"):
-        st.session_state.logged_in_uid = None
-        st.rerun()
 
     # 浪漫 Banner
     love_start = datetime(2022, 8, 13)
@@ -676,6 +680,6 @@ def render_live_system():
         st.markdown(f'<div class="log-bubble">{log}</div>', unsafe_allow_html=True)
 
 # =====================================================
-# 🚀 启动实时连线中心
+# 🚀 启动秒级实时连线中心
 # =====================================================
 render_live_system()
