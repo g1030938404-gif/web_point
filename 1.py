@@ -22,7 +22,7 @@ MAX_LOGS = 1000
 
 SHOP_ITEMS = {
     "台球券": 20, "网吧券": 20, "KTV券": 20,
-    "钓鱼券": 20, "麻将券": 30, "包夜券": 60,"和好券":100
+    "钓鱼券": 20, "麻将券": 30, "包夜券": 60,"不生气券"：60,"和好券":200
 }
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
@@ -379,7 +379,7 @@ st.markdown(f"""
 
 st.sidebar.markdown(f"### 👋 欢迎，**{current_name}**")
 st.sidebar.caption("于道各努力，千里自同风。")
-if st.sidebar.button("🚪 安全退出 system"):
+if st.sidebar.button("🚪 退出系统"):
     st.session_state.logged_in_uid = None
     st.rerun()
 
@@ -496,7 +496,7 @@ with tab1:
 with tab2:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     st.subheader("📋 申报完成事项")
-    task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献、跑通裂缝识别代码...", key="task_input_name")
+    task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献...", key="task_input_name")
     
     c1, c2, c3, c4 = st.columns(4)
     
