@@ -259,6 +259,8 @@ if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
 if not st.session_state.logged_in_uid:
+    # 🚨 修复的关键在这里：加上了 st.markdown("""
+    st.markdown("""
     <div class="login-container glass-card">
         <h2 style='text-align: center; color: #ff758c; margin-bottom: 10px;'>💌 积分系统</h2>
         <p style='text-align: center; color: #95a5a6; margin-bottom: 30px; font-size: 0.9rem;'>Love is going hand in hand and becoming a better person for each other.</p>
