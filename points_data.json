@@ -1,0 +1,71 @@
+{
+    "accounts": {
+        "user1": {
+            "login_id": "ziyang",
+            "password": "123",
+            "display_name": "高梓洋"
+        },
+        "user2": {
+            "login_id": "yutong",
+            "password": "123",
+            "display_name": "杨雨桐"
+        }
+    },
+    "points": {
+        "user1": 10.0,
+        "user2": 0
+    },
+    "logs": [
+        "**05-15 21:40** | **高梓洋** 使用了 麻将券",
+        "**05-15 21:40** | **高梓洋** 兑换了 麻将券 <span style='color:#ff758c; font-weight:bold;'>(-30分)</span>",
+        "**05-15 21:39** | **高梓洋** 自主学习 (11:15-18:30) [满血] <span style='color:#ff758c; font-weight:bold;'>(+24.0分)</span>",
+        "**05-15 21:39** | **高梓洋** 自主学习 (08:00-10:00) [满血] <span style='color:#ff758c; font-weight:bold;'>(+16.0分)</span>"
+    ],
+    "record_history": [
+        "user1_2026-05-15 08:00:00_2026-05-15 10:00:00_自主学习",
+        "user1_2026-05-15 11:15:00_2026-05-15 18:30:00_自主学习"
+    ],
+    "study_records": [
+        {
+            "uid": "user1",
+            "minutes": 120.0,
+            "time": "2026-05-15T21:39:41.974119"
+        },
+        {
+            "uid": "user1",
+            "minutes": 435.0,
+            "time": "2026-05-15T21:39:51.312603"
+        }
+    ],
+    "daily_points": {
+        "2026-05-15": {
+            "user1": 40.0,
+            "user2": 0
+        }
+    },
+    "bounties": [],
+    "study_status": {
+        "user1": {
+            "last_end_time": "2026-05-15T18:30:00",
+            "accumulated_minutes": 435.0,
+            "current_session_start": null,
+            "current_session_type": "自主学习"
+        },
+        "user2": {
+            "last_end_time": null,
+            "accumulated_minutes": 0,
+            "current_session_start": null,
+            "current_session_type": null
+        }
+    },
+    "inventory": {
+        "user1": {
+            "麻将券": 0
+        },
+        "user2": {}
+    },
+    "usage_limits": {
+        "user1": {},
+        "user2": {}
+    }
+}

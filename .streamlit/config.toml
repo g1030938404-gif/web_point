@@ -1,0 +1,15 @@
+[theme]
+# 你的主色调 (按钮、进度条的颜色)
+primaryColor = "#ff4b4b"
+
+# 背景色 (浅灰色，比纯白看起来高级)
+backgroundColor = "#f9f9f9"
+
+# 侧边栏和卡片的背景色 (纯白色)
+secondaryBackgroundColor = "#ffffff"
+
+# 字体颜色 (深灰色，保护视力)
+textColor = "#333333"
+
+# 字体样式 (sans serif 无衬线字体，看起来更现代)
+font = "sans serif"
