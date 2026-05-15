@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from supabase import create_client, Client
 
 # =====================================================
-# Supabase 云数据库配置 (改为安全读取云端 Secrets 模式)
+# Supabase 云数据库配置 (云端 Secrets 安全模式)
 # =====================================================
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
@@ -210,7 +210,7 @@ button[kind="primary"] {
 """, unsafe_allow_html=True)
 
 # =====================================================
-# 云端数据流同步 (带防空自愈机制)
+# 云端数据流同步 (彻底解除死锁，实现实时拉取)
 # =====================================================
 def load_data():
     default_data = {
@@ -231,13 +231,11 @@ def load_data():
         response = supabase.table("points_system").select("config_data").eq("id", 1).execute()
         if response.data and response.data[0]["config_data"]:
             saved_data = response.data[0]["config_data"]
-            # 补齐可能缺失的键
             for key in default_data:
                 if key not in saved_data:
                     saved_data[key] = default_data[key]
             return saved_data
         else:
-            # 如果云端是空的，直接把初始结构 Upsert 进去自愈
             supabase.table("points_system").upsert({"id": 1, "config_data": default_data}).execute()
             return default_data
     except Exception as e:
@@ -250,9 +248,8 @@ def save_data(updated_data):
     except Exception as e:
         st.error(f"☁️ 云端数据同步失败: {e}")
 
-if "data" not in st.session_state:
-    st.session_state.data = load_data()
-data = st.session_state.data
+# ✨ 核心改造：每一次代码重跑，都直接向 Supabase 请求最热乎的数据，废除旧缓存机制
+data = load_data()
 
 # =====================================================
 # 登录界面
@@ -279,7 +276,6 @@ if not st.session_state.logged_in_uid:
                 break
         if matched_uid:
             st.session_state.logged_in_uid = matched_uid
-            st.session_state.data = load_data() # 登录成功时拉取最新云端
             st.rerun()
         else:
             st.error("账号或密码错误 🥺")
@@ -633,6 +629,13 @@ with tab6:
                 st.success("已生效！")
                 st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="glass-card" style="border: 1.5px solid rgba(255, 117, 140, 0.3); text-align: center;">', unsafe_allow_html=True)
+    st.caption("📱 移动端快捷控制")
+    if st.button("🚪 退出当前账号", key="mobile_logout_btn"):
+        st.session_state.logged_in_uid = None
+        st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
 # =====================================================
 # 全局动态区
@@ -640,3 +643,20 @@ with tab6:
 st.markdown("<h3 style='margin-top: 30px; color: #2c3e50;'>📜 我们的足迹</h3>", unsafe_allow_html=True)
 for log in data["logs"][:20]:
     st.markdown(f'<div class="log-bubble">{log}</div>', unsafe_allow_html=True)
+
+# =====================================================
+# ⏱️ ✨ 15秒无感静默云端同步心跳机制
+# =====================================================
+import streamlit.components.v1 as components
+components.html(
+    """
+    <script>
+    // 每隔 15000 毫秒（15秒）在后台默默向主系统发送一次重跑请求，拉取最新 Supabase 数据
+    const interval = setInterval(function() {
+        window.parent.postMessage({type: 'streamlit:rerun'}, '*');
+    }, 15000);
+    </script>
+    """,
+    height=0,
+    width=0,
+)
