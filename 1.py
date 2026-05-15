@@ -5,16 +5,14 @@ from datetime import datetime, timedelta
 from supabase import create_client, Client
 
 # =====================================================
-# Supabase 云数据库配置 (已成功接入)
+# Supabase 云数据库配置
 # =====================================================
 SUPABASE_URL = "https://lodqyhfywibwlynheklf.supabase.co"
 SUPABASE_KEY = "sb_publishable_9gf_AODorGQuWiha5y9IqA__2ie4Ub_"
 
-
 @st.cache_resource
 def get_supabase_client() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
-
 
 supabase = get_supabase_client()
 
@@ -159,7 +157,7 @@ button[kind="primary"] {
     color: white !important;
 }
 
-/* 优化标签页 Tab (手机端支持横向滑动不折行) */
+/* 优化标签页 Tab */
 .stTabs [data-baseweb="tab-list"] {
     gap: 8px;
     padding: 5px;
@@ -211,26 +209,46 @@ button[kind="primary"] {
 </style>
 """, unsafe_allow_html=True)
 
-
 # =====================================================
-# 云端数据流同步 (改造load_data与save_data)
+# 云端数据流同步 (带防空自愈机制)
 # =====================================================
 def load_data():
+    default_data = {
+        "accounts": {
+            "user1": {"login_id": "ziyang", "password": "123", "display_name": "高梓洋"},
+            "user2": {"login_id": "yutong", "password": "123", "display_name": "杨雨桐"}
+        },
+        "points": {"user1": 0, "user2": 0},
+        "logs": [], "record_history": [], "study_records": [], "daily_points": {}, "bounties": [],
+        "study_status": {
+            "user1": {"last_end_time": None, "accumulated_minutes": 0, "current_session_start": None, "current_session_type": None},
+            "user2": {"last_end_time": None, "accumulated_minutes": 0, "current_session_start": None, "current_session_type": None}
+        },
+        "inventory": {"user1": {}, "user2": {}},
+        "usage_limits": {"user1": {}, "user2": {}}
+    }
     try:
         response = supabase.table("points_system").select("config_data").eq("id", 1).execute()
-        if response.data:
-            return response.data[0]["config_data"]
+        if response.data and response.data[0]["config_data"]:
+            saved_data = response.data[0]["config_data"]
+            # 补齐可能缺失的键
+            for key in default_data:
+                if key not in saved_data:
+                    saved_data[key] = default_data[key]
+            return saved_data
+        else:
+            # 如果云端是空的，直接把初始结构 Upsert 进去自愈
+            supabase.table("points_system").upsert({"id": 1, "config_data": default_data}).execute()
+            return default_data
     except Exception as e:
         st.error(f"☁️ 云端数据拉取失败: {e}")
-    return {}
-
+        return default_data
 
 def save_data(updated_data):
     try:
         supabase.table("points_system").update({"config_data": updated_data}).eq("id", 1).execute()
     except Exception as e:
         st.error(f"☁️ 云端数据同步失败: {e}")
-
 
 if "data" not in st.session_state:
     st.session_state.data = load_data()
@@ -261,7 +279,7 @@ if not st.session_state.logged_in_uid:
                 break
         if matched_uid:
             st.session_state.logged_in_uid = matched_uid
-            st.meta = load_data()  # 登录成功时拉取最新云端
+            st.session_state.data = load_data() # 登录成功时拉取最新云端
             st.rerun()
         else:
             st.error("账号或密码错误 🥺")
@@ -277,21 +295,17 @@ target_uid = "user2" if current_uid == "user1" else "user1"
 current_name = data["accounts"][current_uid]["display_name"]
 target_name = data["accounts"][target_uid]["display_name"]
 
-
 def get_today_key(): return datetime.now().strftime("%Y-%m-%d")
-
 
 def get_today_points(uid):
     today = get_today_key()
     if today not in data["daily_points"]: data["daily_points"][today] = {"user1": 0, "user2": 0}
     return data["daily_points"][today][uid]
 
-
 def add_today_points(uid, pts):
     today = get_today_key()
     if today not in data["daily_points"]: data["daily_points"][today] = {"user1": 0, "user2": 0}
     data["daily_points"][today][uid] += pts
-
 
 def add_log(uid, action, points_change):
     time_str = datetime.now().strftime('%m-%d %H:%M')
@@ -305,7 +319,6 @@ def add_log(uid, action, points_change):
     data["logs"] = data["logs"][:MAX_LOGS]
     save_data(data)
     return True
-
 
 def calculate_study_points_smart(uid, new_start_dt, new_end_dt, study_type, is_makeup=False):
     new_minutes = (new_end_dt - new_start_dt).total_seconds() / 60.0
@@ -325,9 +338,7 @@ def calculate_study_points_smart(uid, new_start_dt, new_end_dt, study_type, is_m
     else:
         accumulated_mins = 0
 
-    points = sum(
-        [8 / 60 if (accumulated_mins + step) / 60 < 2 else 6 / 60 if (accumulated_mins + step) / 60 < 4 else 4 / 60 for
-         step in range(int(new_minutes))])
+    points = sum([8 / 60 if (accumulated_mins + step) / 60 < 2 else 6 / 60 if (accumulated_mins + step) / 60 < 4 else 4 / 60 for step in range(int(new_minutes))])
     points = round(points, 1)
 
     remain_pts = DAILY_MAX_POINTS - get_today_points(uid)
@@ -338,16 +349,12 @@ def calculate_study_points_smart(uid, new_start_dt, new_end_dt, study_type, is_m
         data["study_status"][uid]["accumulated_minutes"] = accumulated_mins + new_minutes
     return points, is_continuous
 
-
 def add_study_record(uid, minutes):
     data["study_records"].append({"uid": uid, "minutes": minutes, "time": datetime.now().isoformat()})
     save_data(data)
 
-
 def get_week_study_hours(uid):
-    return round(sum(r["minutes"] for r in data["study_records"] if
-                     r["uid"] == uid and (datetime.now() - datetime.fromisoformat(r["time"])).days < 7) / 60, 1)
-
+    return round(sum(r["minutes"] for r in data["study_records"] if r["uid"] == uid and (datetime.now() - datetime.fromisoformat(r["time"])).days < 7) / 60, 1)
 
 def get_streak_days(uid):
     dates = {datetime.fromisoformat(r["time"]).strftime("%Y-%m-%d") for r in data["study_records"] if r["uid"] == uid}
@@ -355,12 +362,9 @@ def get_streak_days(uid):
     while current.strftime("%Y-%m-%d") in dates: streak += 1; current -= timedelta(days=1)
     return streak
 
-
 def get_month_points(uid):
     now_prefix = f"**{datetime.now().strftime('%m-')}"
-    return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if
-               data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
-
+    return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
 
 # =====================================================
 # 顶部区域 Header
@@ -406,17 +410,17 @@ with col2:
 c1, c2, c3 = st.columns(3)
 mvp_name = current_name if get_month_points(current_uid) >= get_month_points(target_uid) else target_name
 
-with c1:
+with c1: 
     st.markdown(
         f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {get_week_study_hours(current_uid)}h</small><br><small style="color:#2980b9;">{target_name}: {get_week_study_hours(target_uid)}h</small></div>',
         unsafe_allow_html=True
     )
-with c2:
+with c2: 
     st.markdown(
         f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🔥 <b>连续打卡</b><br><small style="color:#e74c3c;">{current_name}: {get_streak_days(current_uid)}天</small><br><small style="color:#2980b9;">{target_name}: {get_streak_days(target_uid)}天</small></div>',
         unsafe_allow_html=True
     )
-with c3:
+with c3: 
     st.markdown(
         f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🏆 <b>本月 MVP</b><br><h3 style="margin:8px 0 0 0; color:#f39c12; font-size:1.2rem;">{mvp_name}</h3></div>',
         unsafe_allow_html=True
@@ -446,8 +450,7 @@ with tab1:
             if total_minutes < 1:
                 st.error("不足 1 分钟，已取消记录。")
             else:
-                pts, is_cont = calculate_study_points_smart(current_uid, rt_start_dt, dt_end,
-                                                            status.get("current_session_type"))
+                pts, is_cont = calculate_study_points_smart(current_uid, rt_start_dt, dt_end, status.get("current_session_type"))
                 add_today_points(current_uid, pts)
                 add_study_record(current_uid, total_minutes)
                 desc = f"{status.get('current_session_type')} [实时]" + (" [连战]" if is_cont else " [满血]")
@@ -459,8 +462,7 @@ with tab1:
     else:
         rt_type = st.selectbox("选择记录类型", ["自主学习", "课堂学习", "碎片化学习"], key="rt_type")
         if st.button("▶️ 专注开始", type="primary"):
-            data["study_status"][current_uid].update(
-                {"current_session_start": datetime.now().isoformat(), "current_session_type": rt_type})
+            data["study_status"][current_uid].update({"current_session_start": datetime.now().isoformat(), "current_session_type": rt_type})
             save_data(data)
             st.rerun()
 
@@ -476,7 +478,7 @@ with tab1:
     study_type = st.selectbox("补录类型", ["自主学习", "课堂学习", "碎片化学习"])
     dt_start = datetime.combine(start_date, start_time)
     dt_end = datetime.combine(end_date, end_time)
-
+    
     if (dt_end - dt_start).total_seconds() > 0 and dt_end <= datetime.now():
         if st.button("提交补录"):
             key = f"{current_uid}_{dt_start}_{dt_end}_{study_type}"
@@ -488,9 +490,7 @@ with tab1:
                 pts, is_cont = calculate_study_points_smart(current_uid, dt_start, dt_end, study_type, is_makeup)
                 add_today_points(current_uid, pts)
                 add_study_record(current_uid, (dt_end - dt_start).total_seconds() / 60)
-                desc = f"{study_type} ({start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')})" + (
-                    " [连战]" if is_cont and study_type == "自主学习" else " [满血]" if study_type == "自主学习" else "") + (
-                           " [补录]" if is_makeup else "")
+                desc = f"{study_type} ({start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')})" + (" [连战]" if is_cont and study_type == "自主学习" else " [满血]" if study_type == "自主学习" else "") + (" [补录]" if is_makeup else "")
                 add_log(current_uid, desc, pts)
                 st.success(f"补录成功，积分 +{pts}")
                 st.rerun()
@@ -500,7 +500,7 @@ with tab1:
 with tab2:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
     task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献.")
-
+    
     c1, c2, c3, c4 = st.columns(4)
     if c1.button("🟢 S级 (+2分)"):
         if task_name: add_log(current_uid, f"完成[S]：{task_name}", 2); st.rerun()
@@ -521,9 +521,7 @@ with tab3:
         b_title = st.text_input("指派任务：")
         b_points = st.number_input("赏金：", min_value=1, value=20)
         if st.button("发布悬赏", type="primary") and b_title:
-            data["bounties"].append(
-                {"id": len(data["bounties"]) + 1, "title": b_title, "points": b_points, "creator": current_uid,
-                 "target": target_uid, "status": "open"})
+            data["bounties"].append({"id": len(data["bounties"]) + 1, "title": b_title, "points": b_points, "creator": current_uid, "target": target_uid, "status": "open"})
             save_data(data)
             st.success("发布成功")
             st.rerun()
@@ -536,15 +534,14 @@ with tab3:
         if not my_b: st.caption("暂时没有悬赏哦")
         for b in my_b:
             c_n, c_btn = st.columns([3, 2])
-            with c_n:
-                st.markdown(f"**{b['title']}** (💰 {b['points']})")
+            with c_n: st.markdown(f"**{b['title']}** (💰 {b['points']})")
             with c_btn:
-                if st.button("申请领赏", key=f"ap_{b['id']}"):
+                if st.button("申请领赏", key=f"ap_{b['id']}"): 
                     b["status"] = "pending"
                     save_data(data)
                     st.rerun()
         st.divider()
-
+        
         pending = [b for b in data["bounties"] if b["creator"] == current_uid and b["status"] == "pending"]
         st.write("✅ **待我审核：**")
         if not pending: st.caption("暂无待审核")
@@ -552,12 +549,12 @@ with tab3:
             st.markdown(f"**{b['title']}** (💰 {b['points']})")
             cp, cr = st.columns(2)
             with cp:
-                if st.button("通过", key=f"ok_{b['id']}", type="primary"):
+                if st.button("通过", key=f"ok_{b['id']}", type="primary"): 
                     b["status"] = "closed"
                     add_log(b["target"], f"完成悬赏：{b['title']}", b["points"])
                     st.rerun()
             with cr:
-                if st.button("驳回", key=f"no_{b['id']}"):
+                if st.button("驳回", key=f"no_{b['id']}"): 
                     b["status"] = "open"
                     save_data(data)
                     st.rerun()
@@ -605,8 +602,7 @@ with tab5:
     for item, count in avail.items():
         c1, c2 = st.columns([4, 1])
         with c1:
-            st.markdown(f"#### 🎟️ {item} <span style='font-size:0.9rem; color:gray;'>(拥有 {count} 张)</span>",
-                        unsafe_allow_html=True)
+            st.markdown(f"#### 🎟️ {item} <span style='font-size:0.9rem; color:gray;'>(拥有 {count} 张)</span>", unsafe_allow_html=True)
         with c2:
             if st.button("使用", key=f"u_{item}"):
                 if item == "包夜券":
