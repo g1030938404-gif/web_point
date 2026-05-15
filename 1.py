@@ -22,7 +22,7 @@ MAX_LOGS = 1000
 
 SHOP_ITEMS = {
     "台球券": 20, "网吧券": 20, "KTV券": 20,
-    "钓鱼券": 20, "麻将券": 30, "包夜券": 60,"不生气券":60,"和好券":200
+    "钓鱼券": 20, "麻将券": 30, "包夜券": 60
 }
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
@@ -210,7 +210,7 @@ button[kind="primary"] {
 """, unsafe_allow_html=True)
 
 # =====================================================
-# 云端数据流同步 (彻底解除死锁，实现实时拉取)
+# 云端数据流底层通信
 # =====================================================
 def load_data():
     default_data = {
@@ -249,16 +249,16 @@ def save_data(updated_data):
     except Exception as e:
         st.error(f"☁️ 云端数据同步失败: {e}")
 
+# 全局初始化快照
 data = load_data()
 
 # =====================================================
-# 登录界面
+# 登录界面 (保持静态，节约未登录时的开销)
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
 if not st.session_state.logged_in_uid:
-    st.markdown("""
     <div class="login-container glass-card">
         <h2 style='text-align: center; color: #ff758c; margin-bottom: 10px;'>💌 积分系统</h2>
         <p style='text-align: center; color: #95a5a6; margin-bottom: 30px; font-size: 0.9rem;'>Love is going hand in hand and becoming a better person for each other.</p>
@@ -284,430 +284,396 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 当前用户 & 工具函数
+# ⏱️ ✨ 核心高频引擎：定义 3秒级自动刷新片段 (Fragment)
 # =====================================================
-current_uid = st.session_state.logged_in_uid
-target_uid = "user2" if current_uid == "user1" else "user1"
-current_name = data["accounts"][current_uid]["display_name"]
-target_name = data["accounts"][target_uid]["display_name"]
+@st.fragment(run_every="3s")
+def render_live_system():
+    # 局部全局化变量，使得工具函数内能完美捕获到每3s刷新的最新快照
+    global data
+    data = load_data() 
 
-def get_today_key(): return datetime.now().strftime("%Y-%m-%d")
+    current_uid = st.session_state.logged_in_uid
+    target_uid = "user2" if current_uid == "user1" else "user1"
+    current_name = data["accounts"][current_uid]["display_name"]
+    target_name = data["accounts"][target_uid]["display_name"]
 
-def get_today_points(uid):
-    today = get_today_key()
-    if today not in data["daily_points"]: data["daily_points"][today] = {"user1": 0, "user2": 0}
-    return data["daily_points"][today][uid]
+    def get_today_key(): return datetime.now().strftime("%Y-%m-%d")
 
-def add_today_points(uid, pts):
-    today = get_today_key()
-    if today not in data["daily_points"]: data["daily_points"][today] = {"user1": 0, "user2": 0}
-    data["daily_points"][today][uid] += pts
+    def get_today_points(uid):
+        today = get_today_key()
+        if today not in data["daily_points"]: data["daily_points"][today] = {"user1": 0, "user2": 0}
+        return data["daily_points"][today][uid]
 
-def add_log(uid, action, points_change):
-    time_str = datetime.now().strftime('%m-%d %H:%M')
-    if points_change != 0:
-        if data["points"][uid] + points_change < 0: return False
-        data["points"][uid] += points_change
-    sign = "+" if points_change > 0 else ""
-    user_name = data["accounts"][uid]["display_name"]
-    log_text = f"**{time_str}** | **{user_name}** {action}" if points_change == 0 else f"**{time_str}** | **{user_name}** {action} <span style='color:#ff758c; font-weight:bold;'>({sign}{points_change}分)</span>"
-    data["logs"].insert(0, log_text)
-    data["logs"] = data["logs"][:MAX_LOGS]
-    save_data(data)
-    return True
+    def add_today_points(uid, pts):
+        today = get_today_key()
+        if today not in data["daily_points"]: data["daily_points"][today] = {"user1": 0, "user2": 0}
+        data["daily_points"][today][uid] += pts
 
-def calculate_study_points_smart(uid, new_start_dt, new_end_dt, study_type, is_makeup=False):
-    new_minutes = (new_end_dt - new_start_dt).total_seconds() / 60.0
-    if study_type == "课堂学习": return round((new_minutes / 60) * 5, 1), False
-    if study_type == "碎片化学习": return round((new_minutes / 60) * 3, 1), False
+    def add_log(uid, action, points_change):
+        time_str = datetime.now().strftime('%m-%d %H:%M')
+        if points_change != 0:
+            if data["points"][uid] + points_change < 0: return False
+            data["points"][uid] += points_change
+        sign = "+" if points_change > 0 else ""
+        user_name = data["accounts"][uid]["display_name"]
+        log_text = f"**{time_str}** | **{user_name}** {action}" if points_change == 0 else f"**{time_str}** | **{user_name}** {action} <span style='color:#ff758c; font-weight:bold;'>({sign}{points_change}分)</span>"
+        data["logs"].insert(0, log_text)
+        data["logs"] = data["logs"][:MAX_LOGS]
+        save_data(data)
+        return True
 
-    status = data["study_status"][uid]
-    last_end_str = status.get("last_end_time")
-    accumulated_mins = status.get("accumulated_minutes", 0)
-    is_continuous = False
+    def calculate_study_points_smart(uid, new_start_dt, new_end_dt, study_type, is_makeup=False):
+        new_minutes = (new_end_dt - new_start_dt).total_seconds() / 60.0
+        if study_type == "课堂学习": return round((new_minutes / 60) * 5, 1), False
+        if study_type == "碎片化学习": return round((new_minutes / 60) * 3, 1), False
 
-    if last_end_str:
-        if 0 <= (new_start_dt - datetime.fromisoformat(last_end_str)).total_seconds() / 60.0 < 20:
-            is_continuous = True
+        status = data["study_status"][uid]
+        last_end_str = status.get("last_end_time")
+        accumulated_mins = status.get("accumulated_minutes", 0)
+        is_continuous = False
+
+        if last_end_str:
+            if 0 <= (new_start_dt - datetime.fromisoformat(last_end_str)).total_seconds() / 60.0 < 20:
+                is_continuous = True
+            else:
+                accumulated_mins = 0
         else:
             accumulated_mins = 0
-    else:
-        accumulated_mins = 0
 
-    points = sum([8 / 60 if (accumulated_mins + step) / 60 < 2 else 6 / 60 if (accumulated_mins + step) / 60 < 4 else 4 / 60 for step in range(int(new_minutes))])
-    points = round(points, 1)
+        points = sum([8 / 60 if (accumulated_mins + step) / 60 < 2 else 6 / 60 if (accumulated_mins + step) / 60 < 4 else 4 / 60 for step in range(int(new_minutes))])
+        points = round(points, 1)
 
-    remain_pts = DAILY_MAX_POINTS - get_today_points(uid)
-    points = 0 if remain_pts <= 0 else min(points, remain_pts)
+        remain_pts = DAILY_MAX_POINTS - get_today_points(uid)
+        points = 0 if remain_pts <= 0 else min(points, remain_pts)
 
-    if not is_makeup:
-        data["study_status"][uid]["last_end_time"] = new_end_dt.isoformat()
-        data["study_status"][uid]["accumulated_minutes"] = accumulated_mins + new_minutes
-    return points, is_continuous
+        if not is_makeup:
+            data["study_status"][uid]["last_end_time"] = new_end_dt.isoformat()
+            data["study_status"][uid]["accumulated_minutes"] = accumulated_mins + new_minutes
+        return points, is_continuous
 
-def add_study_record(uid, minutes):
-    data["study_records"].append({"uid": uid, "minutes": minutes, "time": datetime.now().isoformat()})
-    save_data(data)
+    def add_study_record(uid, minutes):
+        data["study_records"].append({"uid": uid, "minutes": minutes, "time": datetime.now().isoformat()})
+        save_data(data)
 
-def get_week_study_hours(uid):
-    return round(sum(r["minutes"] for r in data["study_records"] if r["uid"] == uid and (datetime.now() - datetime.fromisoformat(r["time"])).days < 7) / 60, 1)
+    def get_week_study_hours(uid):
+        return round(sum(r["minutes"] for r in data["study_records"] if r["uid"] == uid and (datetime.now() - datetime.fromisoformat(r["time"])).days < 7) / 60, 1)
 
-def get_streak_days(uid):
-    dates = {datetime.fromisoformat(r["time"]).strftime("%Y-%m-%d") for r in data["study_records"] if r["uid"] == uid}
-    streak, current = 0, datetime.now()
-    while current.strftime("%Y-%m-%d") in dates: streak += 1; current -= timedelta(days=1)
-    return streak
+    def get_streak_days(uid):
+        dates = {datetime.fromisoformat(r["time"]).strftime("%Y-%m-%d") for r in data["study_records"] if r["uid"] == uid}
+        streak, current = 0, datetime.now()
+        while current.strftime("%Y-%m-%d") in dates: streak += 1; current -= timedelta(days=1)
+        return streak
 
-def get_month_points(uid):
-    now_prefix = f"**{datetime.now().strftime('%m-')}"
-    return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
+    def get_month_points(uid):
+        now_prefix = f"**{datetime.now().strftime('%m-')}"
+        return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
 
-# =====================================================
-# 顶部区域 Header
-# =====================================================
-love_start = datetime(2022, 8, 13)
-love_days = (datetime.now() - love_start).days
-
-st.markdown(f"""
-<div class="romantic-banner">
-    <div class="banner-title">💖 共同进步！</div>
-    <div class="quote-en">"Love is going hand in hand and becoming a better person for each other."</div>
-    <div class="quote-zh">朝暮与共，行至天光</div>
-    <div class="days-count">我们已携手走过 {love_days} 天 ✨</div>
-</div>
-""", unsafe_allow_html=True)
-
-st.sidebar.markdown(f"### 👋 欢迎，**{current_name}**")
-st.sidebar.caption("于道各努力，千里自同风。")
-if st.sidebar.button("🚪 退出系统"):
-    st.session_state.logged_in_uid = None
-    st.rerun()
-
-# --- 积分大看板 ---
-col1, col2 = st.columns(2)
-with col1:
-    st.markdown(f"""
-    <div class="glass-card" style="text-align: center;">
-        <h3 style="color: #7f8c8d; margin-bottom: 0;">🌸 {current_name}</h3>
-        <h1 style="color: #ff758c; font-size: 3rem; margin: 10px 0;">{round(data["points"][current_uid], 1)}</h1>
-        <span style="color: #bdc3c7; font-size: 0.9rem;">我的金库</span>
-    </div>
-    """, unsafe_allow_html=True)
-with col2:
-    st.markdown(f"""
-    <div class="glass-card" style="text-align: center;">
-        <h3 style="color: #7f8c8d; margin-bottom: 0;">✨ {target_name}</h3>
-        <h1 style="color: #3498db; font-size: 3rem; margin: 10px 0;">{round(data["points"][target_uid], 1)}</h1>
-        <span style="color: #bdc3c7; font-size: 0.9rem;">对方金库</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-# --- 学习成就榜 ---
-c1, c2, c3 = st.columns(3)
-mvp_name = current_name if get_month_points(current_uid) >= get_month_points(target_uid) else target_name
-
-with c1: 
-    st.markdown(
-        f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {get_week_study_hours(current_uid)}h</small><br><small style="color:#2980b9;">{target_name}: {get_week_study_hours(target_uid)}h</small></div>',
-        unsafe_allow_html=True
-    )
-with c2: 
-    st.markdown(
-        f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🔥 <b>连续打卡</b><br><small style="color:#e74c3c;">{current_name}: {get_streak_days(current_uid)}天</small><br><small style="color:#2980b9;">{target_name}: {get_streak_days(target_uid)}天</small></div>',
-        unsafe_allow_html=True
-    )
-with c3: 
-    st.markdown(
-        f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🏆 <b>本月 MVP</b><br><h3 style="margin:8px 0 0 0; color:#f39c12; font-size:1.2rem;">{mvp_name}</h3></div>',
-        unsafe_allow_html=True
-    )
-
-# =====================================================
-# 核心功能区 (Tabs)
-# =====================================================
-st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["⏱️ 学习", "📋 任务", "💰 悬赏", "🎁 商店", "🎒 背包", "⚙️ 设置"])
-
-# --- Tab 1 学习 ---
-with tab1:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.info(f"💡 今日积分限额：{get_today_points(current_uid)} / {DAILY_MAX_POINTS}")
-    status = data["study_status"][current_uid]
-
-    st.subheader("🚀 实时记录")
-    rt_start_str = status.get("current_session_start")
-    if rt_start_str:
-        rt_start_dt = datetime.fromisoformat(rt_start_str)
-        elapsed_mins = int((datetime.now() - rt_start_dt).total_seconds() / 60)
-        st.warning(f"正在进行【{status.get('current_session_type')}】，已持续 {elapsed_mins} 分钟 ⏳")
-        if st.button("⏹️ 结束并结算", type="primary"):
-            dt_end = datetime.now()
-            total_minutes = (dt_end - rt_start_dt).total_seconds() / 60
-            if total_minutes < 1:
-                st.error("不足 1 分钟，已取消记录。")
-            else:
-                pts, is_cont = calculate_study_points_smart(current_uid, rt_start_dt, dt_end, status.get("current_session_type"))
-                add_today_points(current_uid, pts)
-                add_study_record(current_uid, total_minutes)
-                desc = f"{status.get('current_session_type')} [实时]" + (" [连战]" if is_cont else " [满血]")
-                add_log(current_uid, desc, pts)
-                st.success(f"太棒了！获得 {pts} 分 🎉")
-            data["study_status"][current_uid]["current_session_start"] = None
-            save_data(data)
-            st.rerun()
-    else:
-        rt_type = st.selectbox("选择记录类型", ["自主学习", "课堂学习", "碎片化学习"], key="rt_type")
-        if st.button("▶️ 专注开始", type="primary"):
-            data["study_status"][current_uid].update({"current_session_start": datetime.now().isoformat(), "current_session_type": rt_type})
-            save_data(data)
-            st.rerun()
-
-    st.divider()
-    st.subheader("📝 历史补录")
-    col_m1, col_m2 = st.columns(2)
-    with col_m1:
-        start_date = st.date_input("开始日期")
-        start_time = st.time_input("开始时间", value=datetime.now().replace(hour=8, minute=0, second=0))
-    with col_m2:
-        end_date = st.date_input("结束日期", value=start_date)
-        end_time = st.time_input("结束时间", value=datetime.now().replace(hour=10, minute=0, second=0))
-    study_type = st.selectbox("补录类型", ["自主学习", "课堂学习", "碎片化学习"])
-    dt_start = datetime.combine(start_date, start_time)
-    dt_end = datetime.combine(end_date, end_time)
-    
-    if (dt_end - dt_start).total_seconds() > 0 and dt_end <= datetime.now():
-        if st.button("提交补录"):
-            key = f"{current_uid}_{dt_start}_{dt_end}_{study_type}"
-            if key in data["record_history"]:
-                st.error("已存在相同记录！")
-            else:
-                data["record_history"].append(key)
-                is_makeup = bool(status["last_end_time"] and dt_start < datetime.fromisoformat(status["last_end_time"]))
-                pts, is_cont = calculate_study_points_smart(current_uid, dt_start, dt_end, study_type, is_makeup)
-                add_today_points(current_uid, pts)
-                add_study_record(current_uid, (dt_end - dt_start).total_seconds() / 60)
-                desc = f"{study_type} ({start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')})" + (" [连战]" if is_cont and study_type == "自主学习" else " [满血]" if study_type == "自主学习" else "") + (" [补录]" if is_makeup else "")
-                add_log(current_uid, desc, pts)
-                st.success(f"补录成功，积分 +{pts}")
-                st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- Tab 2 任务 ---
-with tab2:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("📋 申报完成事项")
-    task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献...", key="task_input_name")
-    
-    c1, c2, c3, c4 = st.columns(4)
-    
-    def submit_task_review(level, pts):
-        if task_name:
-            if "tasks" not in data: data["tasks"] = []
-            new_id = len(data["tasks"]) + 1
-            data["tasks"].append({
-                "id": new_id,
-                "title": task_name,
-                "level": level,
-                "points": pts,
-                "creator": current_uid,
-                "status": "pending"
-            })
-            save_data(data)
-            st.success(f"🚀 {level}级任务已提交！等待 {target_name} 审核确认。")
-            st.rerun()
-        else:
-            st.error("请先输入完成事项描述哦 🥺")
-
-    if c1.button("🟢 S级 (+2分)"): submit_task_review("S", 2)
-    if c2.button("🔵 M级 (+5分)"): submit_task_review("M", 5)
-    if c3.button("🟣 L级 (+10分)"): submit_task_review("L", 10)
-    if c4.button("🟠 SSR (+20分)"): submit_task_review("SSR", 20)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # 任务审批中心
-    st.markdown('<div class="glass-card" style="max-height: 450px; overflow-y: auto;">', unsafe_allow_html=True)
-    if "tasks" not in data: data["tasks"] = []
-    
-    # 1. 待我审核
-    my_audit_tasks = [t for t in data["tasks"] if t["creator"] == target_uid and t["status"] == "pending"]
-    st.write(f"✍️ **待我审核（{target_name} 申报的）：**")
-    if not my_audit_tasks:
-        st.caption("暂无需要你审核的任务 🌟")
-    for t in my_audit_tasks:
-        st.markdown(f"【{t['level']}级】**{t['title']}** (🎁 +{t['points']}分)")
-        t_col1, t_col2 = st.columns(2)
-        with t_col1:
-            if st.button("✅ 准予通过", key=f"t_pass_{t['id']}", type="primary"):
-                t["status"] = "approved"
-                add_log(t["creator"], f"完成任务[{t['level']}]：{t['title']}", t["points"])
-                st.rerun()
-        with t_col2:
-            if st.button("❌ 驳回申请", key=f"t_rej_{t['id']}"):
-                t["status"] = "rejected"
-                save_data(data)
-                st.rerun()
-                
-    st.divider()
-    
-    # 2. 我提交的待审核
-    my_pending_tasks = [t for t in data["tasks"] if t["creator"] == current_uid and t["status"] == "pending"]
-    st.write("⏳ **我提交的待审核任务：**")
-    if not my_pending_tasks:
-        st.caption("暂无审核中的任务")
-    for t in my_pending_tasks:
-        st.markdown(f"【{t['level']}级】**{t['title']}** (💰 {t['points']}分) —— *等待对方审核中...*")
-        
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- Tab 3 悬赏 ---
-with tab3:
-    c_pub, c_list = st.columns([1, 1.2])
-    with c_pub:
-        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.subheader(f"🎯 悬赏 {target_name}")
-        b_title = st.text_input("指派任务：")
-        b_points = st.number_input("赏金：", min_value=1, value=20)
-        if st.button("发布悬赏", type="primary") and b_title:
-            data["bounties"].append({"id": len(data["bounties"]) + 1, "title": b_title, "points": b_points, "creator": current_uid, "target": target_uid, "status": "open"})
-            save_data(data)
-            st.success("发布成功")
-            st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with c_list:
-        st.markdown('<div class="glass-card" style="max-height: 400px; overflow-y: auto;">', unsafe_allow_html=True)
-        my_b = [b for b in data["bounties"] if b["target"] == current_uid and b["status"] == "open"]
-        st.write("📜 **待我完成：**")
-        if not my_b: st.caption("暂时没有悬赏哦")
-        for b in my_b:
-            c_n, c_btn = st.columns([3, 2])
-            with c_n: st.markdown(f"**{b['title']}** (💰 {b['points']})")
-            with c_btn:
-                if st.button("申请领赏", key=f"ap_{b['id']}"): 
-                    b["status"] = "pending"
-                    save_data(data)
-                    st.rerun()
-        st.divider()
-        
-        pending = [b for b in data["bounties"] if b["creator"] == current_uid and b["status"] == "pending"]
-        st.write("✅ **待我审核：**")
-        if not pending: st.caption("暂无待审核")
-        for b in pending:
-            st.markdown(f"**{b['title']}** (💰 {b['points']})")
-            cp, cr = st.columns(2)
-            with cp:
-                if st.button("通过", key=f"ok_{b['id']}", type="primary"): 
-                    b["status"] = "closed"
-                    add_log(b["target"], f"完成悬赏：{b['title']}", b["points"])
-                    st.rerun()
-            with cr:
-                if st.button("驳回", key=f"no_{b['id']}"): 
-                    b["status"] = "open"
-                    save_data(data)
-                    st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-
-# --- Tab 4 商店 ---
-with tab4:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    st.subheader("🛍️ 兑换中心")
-    cols = st.columns(3)
-    for idx, (item, cost) in enumerate(SHOP_ITEMS.items()):
-        with cols[idx % 3]:
-            if st.button(f"{item}\n💰 {cost}"):
-                if item == "包夜券" and data["inventory"][current_uid].get("包夜券", 0) >= 1:
-                    st.error("背包已有，先用完哦！")
-                elif data["points"][current_uid] < cost:
-                    st.error("余额不足")
-                elif add_log(current_uid, f"兑换了 {item}", -cost):
-                    data["inventory"][current_uid][item] = data["inventory"][current_uid].get(item, 0) + 1
-                    save_data(data)
-                    st.success("兑换成功")
-                    st.rerun()
-    st.divider()
-    col_c1, col_c2 = st.columns([2, 1])
-    with col_c1:
-        c_item = st.text_input("自定义愿望：", placeholder="比如：购买商品")
-    with col_c2:
-        c_cost = st.number_input("定价：", min_value=1, value=50)
-    if st.button("兑换自定义愿望", type="primary") and c_item:
-        if data["points"][current_uid] >= c_cost:
-            add_log(current_uid, f"兑换自定义：{c_item}", -c_cost)
-            data["inventory"][current_uid][c_item] = data["inventory"][current_uid].get(c_item, 0) + 1
-            save_data(data)
-            st.success("已收入背包")
-            st.rerun()
-        else:
-            st.error("余额不足")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- Tab 5 背包 ---
-with tab5:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    avail = {k: v for k, v in data["inventory"].get(current_uid, {}).items() if v > 0}
-    if not avail: st.info("背包空空如也，快去兑换吧！")
-    for item, count in avail.items():
-        c1, c2 = st.columns([4, 1])
-        with c1:
-            st.markdown(f"#### 🎟️ {item} <span style='font-size:0.9rem; color:gray;'>(拥有 {count} 张)</span>", unsafe_allow_html=True)
-        with c2:
-            if st.button("使用", key=f"u_{item}"):
-                if item == "包夜券":
-                    cur_m = datetime.now().strftime('%Y-%m')
-                    if data["usage_limits"][current_uid].get("包夜券") == cur_m:
-                        st.error("🚨 本月包夜限额已用完！")
-                        continue
-                    data["usage_limits"][current_uid]["包夜券"] = cur_m
-                data["inventory"][current_uid][item] -= 1
-                add_log(current_uid, f"使用了 {item}", 0)
-                st.success("使用成功！")
-                st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- Tab 6 设置 ---
-with tab6:
-    st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    with st.form("set_f"):
-        n_name = st.text_input("昵称 / Display Name", value=current_name)
-        n_log = st.text_input("登录账号 / Login ID", value=data["accounts"][current_uid]["login_id"])
-        n_pwd = st.text_input("密码 / Password", value=data["accounts"][current_uid]["password"], type="password")
-        if st.form_submit_button("保存设置", type="primary"):
-            if any(uid != current_uid and info["login_id"] == n_log for uid, info in data["accounts"].items()):
-                st.error("账号名冲突！")
-            else:
-                data["accounts"][current_uid].update({"display_name": n_name, "login_id": n_log, "password": n_pwd})
-                save_data(data)
-                st.success("已生效！")
-                st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    st.markdown('<div class="glass-card" style="border: 1.5px solid rgba(255, 117, 140, 0.3); text-align: center;">', unsafe_allow_html=True)
-    st.caption("📱 移动端快捷控制")
-    if st.button("🚪 退出当前账号", key="mobile_logout_btn"):
+    # 渲染侧边栏
+    st.sidebar.markdown(f"### 👋 欢迎，**{current_name}**")
+    st.sidebar.caption("于道各努力，千里自同风。")
+    if st.sidebar.button("🚪 安全退出系统"):
         st.session_state.logged_in_uid = None
         st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
+
+    # 浪漫 Banner
+    love_start = datetime(2022, 8, 13)
+    love_days = (datetime.now() - love_start).days
+    st.markdown(f"""
+    <div class="romantic-banner">
+        <div class="banner-title">💖 共同进步！</div>
+        <div class="quote-en">"Love is going hand in hand and becoming a better person for each other."</div>
+        <div class="quote-zh">朝暮与共，行至天光</div>
+        <div class="days-count">我们已携手走过 {love_days} 天 ✨</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # 积分大看板
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"""
+        <div class="glass-card" style="text-align: center;">
+            <h3 style="color: #7f8c8d; margin-bottom: 0;">🌸 {current_name}</h3>
+            <h1 style="color: #ff758c; font-size: 3rem; margin: 10px 0;">{round(data["points"][current_uid], 1)}</h1>
+            <span style="color: #bdc3c7; font-size: 0.9rem;">我的金库</span>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"""
+        <div class="glass-card" style="text-align: center;">
+            <h3 style="color: #7f8c8d; margin-bottom: 0;">✨ {target_name}</h3>
+            <h1 style="color: #3498db; font-size: 3rem; margin: 10px 0;">{round(data["points"][target_uid], 1)}</h1>
+            <span style="color: #bdc3c7; font-size: 0.9rem;">对方金库</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # 学习成就榜
+    c1, c2, c3 = st.columns(3)
+    mvp_name = current_name if get_month_points(current_uid) >= get_month_points(target_uid) else target_name
+
+    with c1: 
+        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {get_week_study_hours(current_uid)}h</small><br><small style="color:#2980b9;">{target_name}: {get_week_study_hours(target_uid)}h</small></div>', unsafe_allow_html=True)
+    with c2: 
+        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🔥 <b>连续打卡</b><br><small style="color:#e74c3c;">{current_name}: {get_streak_days(current_uid)}天</small><br><small style="color:#2980b9;">{target_name}: {get_streak_days(target_uid)}天</small></div>', unsafe_allow_html=True)
+    with c3: 
+        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🏆 <b>本月 MVP</b><br><h3 style="margin:8px 0 0 0; color:#f39c12; font-size:1.2rem;">{mvp_name}</h3></div>', unsafe_allow_html=True)
+
+    # 选项卡功能区
+    st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["⏱️ 学习", "📋 任务", "💰 悬赏", "🎁 商店", "🎒 背包", "⚙️ 设置"])
+
+    # --- Tab 1 学习 ---
+    with tab1:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.info(f"💡 今日积分限额：{get_today_points(current_uid)} / {DAILY_MAX_POINTS}")
+        status = data["study_status"][current_uid]
+
+        st.subheader("🚀 实时记录")
+        rt_start_str = status.get("current_session_start")
+        if rt_start_str:
+            rt_start_dt = datetime.fromisoformat(rt_start_str)
+            elapsed_mins = int((datetime.now() - rt_start_dt).total_seconds() / 60)
+            st.warning(f"正在进行【{status.get('current_session_type')}】，已持续 {elapsed_mins} 分钟 ⏳")
+            if st.button("⏹️ 结束并结算", type="primary"):
+                dt_end = datetime.now()
+                total_minutes = (dt_end - rt_start_dt).total_seconds() / 60
+                if total_minutes < 1:
+                    st.error("不足 1 分钟，已取消记录。")
+                else:
+                    pts, is_cont = calculate_study_points_smart(current_uid, rt_start_dt, dt_end, status.get("current_session_type"))
+                    add_today_points(current_uid, pts)
+                    add_study_record(current_uid, total_minutes)
+                    desc = f"{status.get('current_session_type')} [实时]" + (" [连战]" if is_cont else " [满血]")
+                    add_log(current_uid, desc, pts)
+                    st.success(f"太棒了！获得 {pts} 分 🎉")
+                data["study_status"][current_uid]["current_session_start"] = None
+                save_data(data)
+                st.rerun()
+        else:
+            rt_type = st.selectbox("选择记录类型", ["自主学习", "课堂学习", "碎片化学习"], key="rt_type")
+            if st.button("▶️ 专注开始", type="primary"):
+                data["study_status"][current_uid].update({"current_session_start": datetime.now().isoformat(), "current_session_type": rt_type})
+                save_data(data)
+                st.rerun()
+
+        st.divider()
+        st.subheader("📝 历史补录")
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            start_date = st.date_input("开始日期")
+            start_time = st.time_input("开始时间", value=datetime.now().replace(hour=8, minute=0, second=0))
+        with col_m2:
+            end_date = st.date_input("结束日期", value=start_date)
+            end_time = st.time_input("结束时间", value=datetime.now().replace(hour=10, minute=0, second=0))
+        study_type = st.selectbox("补录类型", ["自主学习", "课堂学习", "碎片化学习"])
+        dt_start = datetime.combine(start_date, start_time)
+        dt_end = datetime.combine(end_date, end_time)
+        
+        if (dt_end - dt_start).total_seconds() > 0 and dt_end <= datetime.now():
+            if st.button("提交补录"):
+                key = f"{current_uid}_{dt_start}_{dt_end}_{study_type}"
+                if key in data["record_history"]:
+                    st.error("已存在相同记录！")
+                else:
+                    data["record_history"].append(key)
+                    is_makeup = bool(status["last_end_time"] and dt_start < datetime.fromisoformat(status["last_end_time"]))
+                    pts, is_cont = calculate_study_points_smart(current_uid, dt_start, dt_end, study_type, is_makeup)
+                    add_today_points(current_uid, pts)
+                    add_study_record(current_uid, (dt_end - dt_start).total_seconds() / 60)
+                    desc = f"{study_type} ({start_time.strftime('%H:%M')}-{end_time.strftime('%H:%M')})" + (" [连战]" if is_cont and study_type == "自主学习" else " [满血]" if study_type == "自主学习" else "") + (" [补录]" if is_makeup else "")
+                    add_log(current_uid, desc, pts)
+                    st.success(f"补录成功，积分 +{pts}")
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Tab 2 任务 (极速无感刷新区) ---
+    with tab2:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.subheader("📋 申报完成事项")
+        task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献、跑通裂缝识别代码...", key="task_input_name")
+        
+        c1, c2, c3, c4 = st.columns(4)
+        
+        def submit_task_review(level, pts):
+            if task_name:
+                if "tasks" not in data: data["tasks"] = []
+                new_id = len(data["tasks"]) + 1
+                data["tasks"].append({
+                    "id": new_id, "title": task_name, "level": level, "points": pts, "creator": current_uid, "status": "pending"
+                })
+                save_data(data)
+                st.success(f"🚀 {level}级任务已提交！等待 {target_name} 审核确认。")
+                st.rerun()
+            else:
+                st.error("请先输入完成事项描述哦 🥺")
+
+        if c1.button("🟢 S级 (+2分)"): submit_task_review("S", 2)
+        if c2.button("🔵 M级 (+5分)"): submit_task_review("M", 5)
+        if c3.button("🟣 L级 (+10分)"): submit_task_review("L", 10)
+        if c4.button("🟠 SSR (+20分)"): submit_task_review("SSR", 20)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        # 任务审批中心
+        st.markdown('<div class="glass-card" style="max-height: 450px; overflow-y: auto;">', unsafe_allow_html=True)
+        if "tasks" not in data: data["tasks"] = []
+        
+        my_audit_tasks = [t for t in data["tasks"] if t["creator"] == target_uid and t["status"] == "pending"]
+        st.write(f"✍️ **待我审核（{target_name} 申报的）：**")
+        if not my_audit_tasks:
+            st.caption("暂无需要你审核的任务 🌟")
+        for t in my_audit_tasks:
+            st.markdown(f"【{t['level']}级】**{t['title']}** (🎁 +{t['points']}分)")
+            t_col1, t_col2 = st.columns(2)
+            with t_col1:
+                if st.button("✅ 准予通过", key=f"t_pass_{t['id']}", type="primary"):
+                    t["status"] = "approved"
+                    add_log(t["creator"], f"完成任务[{t['level']}]：{t['title']}", t["points"])
+                    st.rerun()
+            with t_col2:
+                if st.button("❌ 驳回申请", key=f"t_rej_{t['id']}"):
+                    t["status"] = "rejected"
+                    save_data(data)
+                    st.rerun()
+                    
+        st.divider()
+        my_pending_tasks = [t for t in data["tasks"] if t["creator"] == current_uid and t["status"] == "pending"]
+        st.write("⏳ **我提交的待审核任务：**")
+        if not my_pending_tasks: st.caption("暂无审核中的任务")
+        for t in my_pending_tasks:
+            st.markdown(f"【{t['level']}级】**{t['title']}** (💰 {t['points']}分) —— *等待对方审核中...*")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Tab 3 悬赏 ---
+    with tab3:
+        c_pub, c_list = st.columns([1, 1.2])
+        with c_pub:
+            st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+            st.subheader(f"🎯 悬赏 {target_name}")
+            b_title = st.text_input("指派任务：")
+            b_points = st.number_input("赏金：", min_value=1, value=20)
+            if st.button("发布悬赏", type="primary") and b_title:
+                data["bounties"].append({"id": len(data["bounties"]) + 1, "title": b_title, "points": b_points, "creator": current_uid, "target": target_uid, "status": "open"})
+                save_data(data)
+                st.success("发布成功")
+                st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+        with c_list:
+            st.markdown('<div class="glass-card" style="max-height: 400px; overflow-y: auto;">', unsafe_allow_html=True)
+            my_b = [b for b in data["bounties"] if b["target"] == current_uid and b["status"] == "open"]
+            st.write("📜 **待我完成：**")
+            if not my_b: st.caption("暂时没有悬赏哦")
+            for b in my_b:
+                c_n, c_btn = st.columns([3, 2])
+                with c_n: st.markdown(f"**{b['title']}** (💰 {b['points']})")
+                with c_btn:
+                    if st.button("申请领赏", key=f"ap_{b['id']}"): 
+                        b["status"] = "pending"
+                        save_data(data)
+                        st.rerun()
+            st.divider()
+            
+            pending = [b for b in data["bounties"] if b["creator"] == current_uid and b["status"] == "pending"]
+            st.write("✅ **待我审核：**")
+            if not pending: st.caption("暂无待审核")
+            for b in pending:
+                st.markdown(f"**{b['title']}** (💰 {b['points']})")
+                cp, cr = st.columns(2)
+                with cp:
+                    if st.button("通过", key=f"ok_{b['id']}", type="primary"): 
+                        b["status"] = "closed"
+                        add_log(b["target"], f"完成悬赏：{b['title']}", b["points"])
+                        st.rerun()
+                with cr:
+                    if st.button("驳回", key=f"no_{b['id']}"): 
+                        b["status"] = "open"
+                        save_data(data)
+                        st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Tab 4 商店 ---
+    with tab4:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        st.subheader("🛍️ 兑换中心")
+        cols = st.columns(3)
+        for idx, (item, cost) in enumerate(SHOP_ITEMS.items()):
+            with cols[idx % 3]:
+                if st.button(f"{item}\n💰 {cost}"):
+                    if item == "包夜券" and data["inventory"][current_uid].get("包夜券", 0) >= 1:
+                        st.error("背包已有，先用完哦！")
+                    elif data["points"][current_uid] < cost:
+                        st.error("余额不足")
+                    elif add_log(current_uid, f"兑换了 {item}", -cost):
+                        data["inventory"][current_uid][item] = data["inventory"][current_uid].get(item, 0) + 1
+                        save_data(data)
+                        st.success("兑换成功")
+                        st.rerun()
+        st.divider()
+        col_c1, col_c2 = st.columns([2, 1])
+        with col_c1: c_item = st.text_input("自定义愿望：", placeholder="比如：购买商品")
+        with col_c2: c_cost = st.number_input("定价：", min_value=1, value=50)
+        if st.button("兑换自定义愿望", type="primary") and c_item:
+            if data["points"][current_uid] >= c_cost:
+                add_log(current_uid, f"兑换自定义：{c_item}", -c_cost)
+                data["inventory"][current_uid][c_item] = data["inventory"][current_uid].get(c_item, 0) + 1
+                save_data(data)
+                st.success("已收入背包")
+                st.rerun()
+            else:
+                st.error("余额不足")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Tab 5 背包 ---
+    with tab5:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        avail = {k: v for k, v in data["inventory"].get(current_uid, {}).items() if v > 0}
+        if not avail: st.info("背包空空如也，快去兑换吧！")
+        for item, count in avail.items():
+            c1, c2 = st.columns([4, 1])
+            with c1: st.markdown(f"#### 🎟️ {item} <span style='font-size:0.9rem; color:gray;'>(拥有 {count} 张)</span>", unsafe_allow_html=True)
+            with c2:
+                if st.button("使用", key=f"u_{item}"):
+                    if item == "包夜券":
+                        cur_m = datetime.now().strftime('%Y-%m')
+                        if data["usage_limits"][current_uid].get("包夜券") == cur_m:
+                            st.error("🚨 本月包夜限额已用完！")
+                            continue
+                        data["usage_limits"][current_uid]["包夜券"] = cur_m
+                    data["inventory"][current_uid][item] -= 1
+                    add_log(current_uid, f"使用了 {item}", 0)
+                    st.success("使用成功！")
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- Tab 6 设置 ---
+    with tab6:
+        st.markdown('<div class="glass-card">', unsafe_allow_html=True)
+        with st.form("set_f"):
+            n_name = st.text_input("昵称 / Display Name", value=current_name)
+            n_log = st.text_input("登录账号 / Login ID", value=data["accounts"][current_uid]["login_id"])
+            n_pwd = st.text_input("密码 / Password", value=data["accounts"][current_uid]["password"], type="password")
+            if st.form_submit_button("保存设置", type="primary"):
+                if any(uid != current_uid and info["login_id"] == n_log for uid, info in data["accounts"].items()):
+                    st.error("账号名冲突！")
+                else:
+                    data["accounts"][current_uid].update({"display_name": n_name, "login_id": n_log, "password": n_pwd})
+                    save_data(data)
+                    st.success("已生效！")
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        st.markdown('<div class="glass-card" style="border: 1.5px solid rgba(255, 117, 140, 0.3); text-align: center;">', unsafe_allow_html=True)
+        st.caption("📱 移动端快捷控制")
+        if st.button("🚪 退出当前账号", key="mobile_logout_btn"):
+            st.session_state.logged_in_uid = None
+            st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # 全局足迹动态
+    st.markdown("<h3 style='margin-top: 30px; color: #2c3e50;'>📜 我们的足迹</h3>", unsafe_allow_html=True)
+    for log in data["logs"][:20]:
+        st.markdown(f'<div class="log-bubble">{log}</div>', unsafe_allow_html=True)
 
 # =====================================================
-# 全局动态区
+# 🚀 启动实时连线中心
 # =====================================================
-st.markdown("<h3 style='margin-top: 30px; color: #2c3e50;'>📜 我们的足迹</h3>", unsafe_allow_html=True)
-for log in data["logs"][:20]:
-    st.markdown(f'<div class="log-bubble">{log}</div>', unsafe_allow_html=True)
-
-# =====================================================
-# ⏱️ ✨ 3秒极速无感静默云端同步心跳机制
-# =====================================================
-import streamlit.components.v1 as components
-components.html(
-    """
-    <script>
-    // 刷新时间已成功修改为 3000 毫秒（3秒极速联机模式）
-    const interval = setInterval(function() {
-        window.parent.postMessage({type: 'streamlit:rerun'}, '*');
-    }, 3000);
-    </script>
-    """,
-    height=0,
-    width=0,
-)
+render_live_system()
