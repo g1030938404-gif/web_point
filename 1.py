@@ -1,7 +1,7 @@
 import streamlit as st
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
 # =====================================================
@@ -22,11 +22,17 @@ MAX_LOGS = 1000
 
 SHOP_ITEMS = {
     "台球券": 20, "网吧券": 20, "KTV券": 20,
-    "钓鱼券": 20, "麻将券": 30, "包夜券": 60,
-    "不生气券":60,"和好券":200
+    "钓鱼券": 20, "麻将券": 30, "包夜券": 60
 }
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
+
+# =====================================================
+# 🧭 ✨ 强行校准：全球服务器无缝锁定北京时间 (UTC+8)
+# =====================================================
+def get_china_now():
+    # 获取标准 UTC 时间，抹除原本的时区标签，手动加上 8 小时转换为纯净的北京时间
+    return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=8)
 
 # =====================================================
 # 🌟 全设备完美适配 UI CSS (磨砂玻璃/流光/移动响应式)
@@ -310,7 +316,7 @@ def render_live_system():
     current_name = data["accounts"][current_uid]["display_name"]
     target_name = data["accounts"][target_uid]["display_name"]
 
-    def get_today_key(): return datetime.now().strftime("%Y-%m-%d")
+    def get_today_key(): return get_china_now().strftime("%Y-%m-%d")
 
     def get_today_points(uid):
         today = get_today_key()
@@ -323,7 +329,7 @@ def render_live_system():
         data["daily_points"][today][uid] += pts
 
     def add_log(uid, action, points_change):
-        time_str = datetime.now().strftime('%m-%d %H:%M')
+        time_str = get_china_now().strftime('%m-%d %H:%M')
         if points_change != 0:
             if data["points"][uid] + points_change < 0: return False
             data["points"][uid] += points_change
@@ -365,25 +371,25 @@ def render_live_system():
         return points, is_continuous
 
     def add_study_record(uid, minutes):
-        data["study_records"].append({"uid": uid, "minutes": minutes, "time": datetime.now().isoformat()})
+        data["study_records"].append({"uid": uid, "minutes": minutes, "time": get_china_now().isoformat()})
         save_data(data)
 
     def get_week_study_hours(uid):
-        return round(sum(r["minutes"] for r in data["study_records"] if r["uid"] == uid and (datetime.now() - datetime.fromisoformat(r["time"])).days < 7) / 60, 1)
+        return round(sum(r["minutes"] for r in data["study_records"] if r["uid"] == uid and (get_china_now() - datetime.fromisoformat(r["time"])).days < 7) / 60, 1)
 
     def get_streak_days(uid):
         dates = {datetime.fromisoformat(r["time"]).strftime("%Y-%m-%d") for r in data["study_records"] if r["uid"] == uid}
-        streak, current = 0, datetime.now()
+        streak, current = 0, get_china_now()
         while current.strftime("%Y-%m-%d") in dates: streak += 1; current -= timedelta(days=1)
         return streak
 
     def get_month_points(uid):
-        now_prefix = f"**{datetime.now().strftime('%m-')}"
+        now_prefix = f"**{get_china_now().strftime('%m-')}"
         return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
 
     # 浪漫 Banner
     love_start = datetime(2022, 8, 13)
-    love_days = (datetime.now() - love_start).days
+    love_days = (get_china_now() - love_start).days
     st.markdown(f"""
     <div class="romantic-banner">
         <div class="banner-title">💖 共同进步！</div>
@@ -437,10 +443,10 @@ def render_live_system():
         rt_start_str = status.get("current_session_start")
         if rt_start_str:
             rt_start_dt = datetime.fromisoformat(rt_start_str)
-            elapsed_mins = int((datetime.now() - rt_start_dt).total_seconds() / 60)
+            elapsed_mins = int((get_china_now() - rt_start_dt).total_seconds() / 60)
             st.warning(f"正在进行【{status.get('current_session_type')}】，已持续 {elapsed_mins} 分钟 ⏳")
             if st.button("⏹️ 结束并结算", type="primary"):
-                dt_end = datetime.now()
+                dt_end = get_china_now()
                 total_minutes = (dt_end - rt_start_dt).total_seconds() / 60
                 if total_minutes < 1:
                     st.error("不足 1 分钟，已取消记录。")
@@ -457,7 +463,7 @@ def render_live_system():
         else:
             rt_type = st.selectbox("选择记录类型", ["自主学习", "课堂学习", "碎片化学习"], key="rt_type")
             if st.button("▶️ 专注开始", type="primary"):
-                data["study_status"][current_uid].update({"current_session_start": datetime.now().isoformat(), "current_session_type": rt_type})
+                data["study_status"][current_uid].update({"current_session_start": get_china_now().isoformat(), "current_session_type": rt_type})
                 save_data(data)
                 st.rerun()
 
@@ -466,15 +472,15 @@ def render_live_system():
         col_m1, col_m2 = st.columns(2)
         with col_m1:
             start_date = st.date_input("开始日期")
-            start_time = st.time_input("开始时间", value=datetime.now().replace(hour=8, minute=0, second=0))
+            start_time = st.time_input("开始时间", value=get_china_now().replace(hour=8, minute=0, second=0))
         with col_m2:
             end_date = st.date_input("结束日期", value=start_date)
-            end_time = st.time_input("结束时间", value=datetime.now().replace(hour=10, minute=0, second=0))
+            end_time = st.time_input("结束时间", value=get_china_now().replace(hour=10, minute=0, second=0))
         study_type = st.selectbox("补录类型", ["自主学习", "课堂学习", "碎片化学习"])
         dt_start = datetime.combine(start_date, start_time)
         dt_end = datetime.combine(end_date, end_time)
         
-        if (dt_end - dt_start).total_seconds() > 0 and dt_end <= datetime.now():
+        if (dt_end - dt_start).total_seconds() > 0 and dt_end <= get_china_now():
             if st.button("提交补录"):
                 key = f"{current_uid}_{dt_start}_{dt_end}_{study_type}"
                 if key in data["record_history"]:
@@ -548,7 +554,7 @@ def render_live_system():
             st.markdown(f"【{t['level']}级】**{t['title']}** (💰 {t['points']}分) —— *等待对方审核中...*")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Tab 3 悬赏 (✨ 新增一键拒绝及清除机制) ---
+    # --- Tab 3 悬赏 ---
     with tab3:
         c_pub, c_list = st.columns([1, 1.2])
         with c_pub:
@@ -578,8 +584,8 @@ def render_live_system():
                         st.rerun()
                 with c_btn2:
                     if st.button("拒绝", key=f"rej_b_{b['id']}"):
-                        b["status"] = "rejected" # 状态变更为 rejected，列表将直接过滤清除
-                        add_log(current_uid, f"拒绝了 {target_name} 的悬赏：{b['title']}", 0) # 自动追加入口日志
+                        b["status"] = "rejected" 
+                        add_log(current_uid, f"拒绝了 {target_name} 的悬赏：{b['title']}", 0) 
                         st.rerun()
             st.divider()
             
@@ -644,7 +650,7 @@ def render_live_system():
             with c2:
                 if st.button("使用", key=f"u_{item}"):
                     if item == "包夜券":
-                        cur_m = datetime.now().strftime('%Y-%m')
+                        cur_m = get_china_now().strftime('%Y-%m')
                         if data["usage_limits"][current_uid].get("包夜券") == cur_m:
                             st.error("🚨 本月包夜限额已用完！")
                             continue
