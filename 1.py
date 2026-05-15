@@ -220,6 +220,7 @@ def load_data():
         },
         "points": {"user1": 0, "user2": 0},
         "logs": [], "record_history": [], "study_records": [], "daily_points": {}, "bounties": [],
+        "tasks": [], 
         "study_status": {
             "user1": {"last_end_time": None, "accumulated_minutes": 0, "current_session_start": None, "current_session_type": None},
             "user2": {"last_end_time": None, "accumulated_minutes": 0, "current_session_start": None, "current_session_type": None}
@@ -248,7 +249,6 @@ def save_data(updated_data):
     except Exception as e:
         st.error(f"☁️ 云端数据同步失败: {e}")
 
-# ✨ 核心改造：每一次代码重跑，都直接向 Supabase 请求最热乎的数据，废除旧缓存机制
 data = load_data()
 
 # =====================================================
@@ -379,7 +379,7 @@ st.markdown(f"""
 
 st.sidebar.markdown(f"### 👋 欢迎，**{current_name}**")
 st.sidebar.caption("于道各努力，千里自同风。")
-if st.sidebar.button("🚪 安全退出系统"):
+if st.sidebar.button("🚪 安全退出 system"):
     st.session_state.logged_in_uid = None
     st.rerun()
 
@@ -495,17 +495,68 @@ with tab1:
 # --- Tab 2 任务 ---
 with tab2:
     st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-    task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献.")
+    st.subheader("📋 申报完成事项")
+    task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献、跑通裂缝识别代码...", key="task_input_name")
     
     c1, c2, c3, c4 = st.columns(4)
-    if c1.button("🟢 S级 (+2分)"):
-        if task_name: add_log(current_uid, f"完成[S]：{task_name}", 2); st.rerun()
-    if c2.button("🔵 M级 (+5分)"):
-        if task_name: add_log(current_uid, f"完成[M]：{task_name}", 5); st.rerun()
-    if c3.button("🟣 L级 (+10分)"):
-        if task_name: add_log(current_uid, f"完成[L]：{task_name}", 10); st.rerun()
-    if c4.button("🟠 SSR (+20分)"):
-        if task_name: add_log(current_uid, f"完成[SSR]：{task_name}", 20); st.rerun()
+    
+    def submit_task_review(level, pts):
+        if task_name:
+            if "tasks" not in data: data["tasks"] = []
+            new_id = len(data["tasks"]) + 1
+            data["tasks"].append({
+                "id": new_id,
+                "title": task_name,
+                "level": level,
+                "points": pts,
+                "creator": current_uid,
+                "status": "pending"
+            })
+            save_data(data)
+            st.success(f"🚀 {level}级任务已提交！等待 {target_name} 审核确认。")
+            st.rerun()
+        else:
+            st.error("请先输入完成事项描述哦 🥺")
+
+    if c1.button("🟢 S级 (+2分)"): submit_task_review("S", 2)
+    if c2.button("🔵 M级 (+5分)"): submit_task_review("M", 5)
+    if c3.button("🟣 L级 (+10分)"): submit_task_review("L", 10)
+    if c4.button("🟠 SSR (+20分)"): submit_task_review("SSR", 20)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # 任务审批中心
+    st.markdown('<div class="glass-card" style="max-height: 450px; overflow-y: auto;">', unsafe_allow_html=True)
+    if "tasks" not in data: data["tasks"] = []
+    
+    # 1. 待我审核
+    my_audit_tasks = [t for t in data["tasks"] if t["creator"] == target_uid and t["status"] == "pending"]
+    st.write(f"✍️ **待我审核（{target_name} 申报的）：**")
+    if not my_audit_tasks:
+        st.caption("暂无需要你审核的任务 🌟")
+    for t in my_audit_tasks:
+        st.markdown(f"【{t['level']}级】**{t['title']}** (🎁 +{t['points']}分)")
+        t_col1, t_col2 = st.columns(2)
+        with t_col1:
+            if st.button("✅ 准予通过", key=f"t_pass_{t['id']}", type="primary"):
+                t["status"] = "approved"
+                add_log(t["creator"], f"完成任务[{t['level']}]：{t['title']}", t["points"])
+                st.rerun()
+        with t_col2:
+            if st.button("❌ 驳回申请", key=f"t_rej_{t['id']}"):
+                t["status"] = "rejected"
+                save_data(data)
+                st.rerun()
+                
+    st.divider()
+    
+    # 2. 我提交的待审核
+    my_pending_tasks = [t for t in data["tasks"] if t["creator"] == current_uid and t["status"] == "pending"]
+    st.write("⏳ **我提交的待审核任务：**")
+    if not my_pending_tasks:
+        st.caption("暂无审核中的任务")
+    for t in my_pending_tasks:
+        st.markdown(f"【{t['level']}级】**{t['title']}** (💰 {t['points']}分) —— *等待对方审核中...*")
+        
     st.markdown('</div>', unsafe_allow_html=True)
 
 # --- Tab 3 悬赏 ---
@@ -645,16 +696,16 @@ for log in data["logs"][:20]:
     st.markdown(f'<div class="log-bubble">{log}</div>', unsafe_allow_html=True)
 
 # =====================================================
-# ⏱️ ✨ 15秒无感静默云端同步心跳机制
+# ⏱️ ✨ 3秒极速无感静默云端同步心跳机制
 # =====================================================
 import streamlit.components.v1 as components
 components.html(
     """
     <script>
-    // 每隔 15000 毫秒（15秒）在后台默默向主系统发送一次重跑请求，拉取最新 Supabase 数据
+    // 刷新时间已成功修改为 3000 毫秒（3秒极速联机模式）
     const interval = setInterval(function() {
         window.parent.postMessage({type: 'streamlit:rerun'}, '*');
-    }, 15000);
+    }, 3000);
     </script>
     """,
     height=0,
