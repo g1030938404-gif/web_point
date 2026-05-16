@@ -35,172 +35,47 @@ def get_china_now():
     return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=8)
 
 # =====================================================
-# 🌟 全设备完美适配 UI CSS (磨砂玻璃/流光/移动响应式)
+# 🌟 全设备完美适配 UI CSS
 # =====================================================
 st.markdown("""
 <style>
-/* 隐藏默认元素 */
 #MainMenu, footer, header {visibility: hidden;}
-
-/* 全局布局最大宽度限制 */
-.block-container {
-    padding-top: 1rem !important; 
-    padding-bottom: 2rem !important; 
-    max-width: 850px !important;
-    margin: 0 auto;
-}
-
-/* 全局背景：浪漫流光渐变 */
+.block-container { padding-top: 1rem !important; padding-bottom: 2rem !important; max-width: 850px !important; margin: 0 auto; }
 .stApp {
     background: linear-gradient(120deg, #fdfbfb 0%, #ebedee 100%);
-    background-image: radial-gradient(at 0% 0%, hsla(353,100%,93%,1) 0, transparent 50%), 
-                      radial-gradient(at 100% 100%, hsla(202,100%,92%,1) 0, transparent 50%);
-    background-attachment: fixed;
-    font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif;
+    background-image: radial-gradient(at 0% 0%, hsla(353,100%,93%,1) 0, transparent 50%), radial-gradient(at 100% 100%, hsla(202,100%,92%,1) 0, transparent 50%);
+    background-attachment: fixed; font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
-
-/* 磨砂玻璃通用卡片 */
 .glass-card {
-    background: rgba(255, 255, 255, 0.65);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.8);
-    border-radius: 20px;
-    padding: 24px;
-    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
-    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
-    margin-bottom: 16px;
-    width: 100%;
-    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.65); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 20px; padding: 24px;
+    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05); transition: all 0.3s; margin-bottom: 16px; width: 100%; box-sizing: border-box;
 }
-.glass-card:hover {
-    box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.1);
-    transform: translateY(-3px);
-}
-
-/* 浪漫 Banner 设计 */
+.glass-card:hover { box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.1); transform: translateY(-3px); }
 .romantic-banner {
-    text-align: center;
-    padding: 30px 20px;
-    background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 245, 247, 0.8) 100%);
-    border-radius: 24px;
-    margin-bottom: 20px;
-    box-shadow: 0 10px 30px rgba(255, 117, 140, 0.1);
-    position: relative;
-    overflow: hidden;
+    text-align: center; padding: 30px 20px; background: linear-gradient(135deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 245, 247, 0.8) 100%);
+    border-radius: 24px; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(255, 117, 140, 0.1); position: relative; overflow: hidden;
 }
-.banner-title {
-    color: #2c3e50;
-    font-weight: 800;
-    font-size: 2.4rem;
-    margin-bottom: 15px;
-    letter-spacing: 2px;
-}
-.quote-en {
-    font-size: 1rem;
-    color: #95a5a6;
-    font-style: italic;
-    margin-bottom: 10px;
-    letter-spacing: 0.5px;
-    line-height: 1.4;
-}
-.quote-zh {
-    font-size: 1.2rem;
-    font-weight: 600;
-    background: linear-gradient(120deg, #ff758c 0%, #ff7eb3 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    letter-spacing: 3px;
-    margin-bottom: 15px;
-}
-.days-count {
-    display: inline-block;
-    padding: 6px 16px;
-    background-color: #fff;
-    border-radius: 20px;
-    color: #ff758c;
-    font-size: 0.9rem;
-    font-weight: bold;
-    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-}
-
-/* 登录框居中魔法 */
-.login-container {
-    max-width: 400px;
-    margin: 10vh auto;
-    padding: 40px 30px;
-}
-
-/* 优化输入框和下拉框 */
+.banner-title { color: #2c3e50; font-weight: 800; font-size: 2.4rem; margin-bottom: 15px; letter-spacing: 2px; }
+.quote-en { font-size: 1rem; color: #95a5a6; font-style: italic; margin-bottom: 10px; line-height: 1.4; }
+.quote-zh { font-size: 1.2rem; font-weight: 600; background: linear-gradient(120deg, #ff758c 0%, #ff7eb3 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; letter-spacing: 3px; margin-bottom: 15px; }
+.days-count { display: inline-block; padding: 6px 16px; background-color: #fff; border-radius: 20px; color: #ff758c; font-size: 0.9rem; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+.login-container { max-width: 400px; margin: 10vh auto; padding: 40px 30px; }
 .stTextInput input, .stNumberInput input, .stSelectbox > div > div {
-    border-radius: 12px !important;
-    border: 1.5px solid #f1f2f6 !important;
-    background-color: rgba(255, 255, 255, 0.9) !important;
-    transition: 0.3s !important;
+    border-radius: 12px !important; border: 1.5px solid #f1f2f6 !important; background-color: rgba(255, 255, 255, 0.9) !important; transition: 0.3s !important;
 }
-
-/* 优化所有的自带 st.button */
+.stTextInput input:focus, .stSelectbox > div > div:focus { border-color: #ff758c !important; box-shadow: 0 0 0 2px rgba(255,117,140,0.2) !important; }
 .stButton > button {
-    width: 100%;
-    border-radius: 12px !important;
-    border: none !important;
-    background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%) !important;
-    color: #4a4a4a !important;
-    font-weight: bold !important;
-    padding: 0.6rem 1rem !important;
-    transition: all 0.3s ease !important;
+    width: 100%; border-radius: 12px !important; border: none !important; background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%) !important;
+    color: #4a4a4a !important; font-weight: bold !important; padding: 0.6rem 1rem !important; transition: all 0.3s ease !important;
 }
-.stButton > button:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 5px 15px rgba(255,154,158, 0.4) !important;
-    color: #fff !important;
-}
-button[kind="primary"] {
-    background: linear-gradient(135deg, #ff758c 0%, #ff7eb3 100%) !important;
-    color: white !important;
-}
-
-/* 优化标签页 Tab */
-.stTabs [data-baseweb="tab-list"] {
-    gap: 8px;
-    padding: 5px;
-    background-color: rgba(255, 255, 255, 0.5);
-    border-radius: 16px;
-}
-.stTabs [data-baseweb="tab"] {
-    border-radius: 12px !important;
-    padding: 8px 16px !important;
-    border: none !important;
-    background-color: transparent;
-}
-.stTabs [aria-selected="true"] {
-    background-color: #fff !important;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05) !important;
-    color: #ff758c !important;
-    font-weight: bold !important;
-}
-
-/* 日志气泡 */
-.log-bubble {
-    background: #ffffff;
-    border-left: 4px solid #ff758c;
-    padding: 12px 16px;
-    border-radius: 0 12px 12px 0;
-    margin-bottom: 10px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
-    font-size: 0.95rem;
-    color: #34495e;
-    word-wrap: break-word;
-}
-
-@media (max-width: 768px) {
-    .block-container {
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
-    }
-    .banner-title { font-size: 1.8rem; }
-    .glass-card { padding: 16px; }
-}
+.stButton > button:hover { transform: translateY(-2px) !important; box-shadow: 0 5px 15px rgba(255,154,158, 0.4) !important; color: #fff !important; }
+button[kind="primary"] { background: linear-gradient(135deg, #ff758c 0%, #ff7eb3 100%) !important; color: white !important; }
+.stTabs [data-baseweb="tab-list"] { gap: 8px; padding: 5px; background-color: rgba(255, 255, 255, 0.5); border-radius: 16px; }
+.stTabs [data-baseweb="tab"] { border-radius: 12px !important; padding: 8px 16px !important; border: none !important; background-color: transparent; }
+.stTabs [aria-selected="true"] { background-color: #fff !important; box-shadow: 0 2px 10px rgba(0,0,0,0.05) !important; color: #ff758c !important; font-weight: bold !important; }
+.log-bubble { background: #ffffff; border-left: 4px solid #ff758c; padding: 12px 16px; border-radius: 0 12px 12px 0; margin-bottom: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.03); font-size: 0.95rem; color: #34495e; word-wrap: break-word; }
+@media (max-width: 768px) { .block-container { padding-left: 1rem !important; padding-right: 1rem !important; } .banner-title { font-size: 1.8rem; } .glass-card { padding: 16px; } }
 </style>
 """, unsafe_allow_html=True)
 
@@ -247,16 +122,17 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🔐 自动登录判定（iOS 终极暗号无感放行机制）
+# 🔐 终极拦截：最高优先级暗号放行机制 (免疫所有清理)
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
-# 检测 URL 尾巴上是否带有暗号，如：?u=ziyang
-url_code = st.query_params.get("u")
-if url_code and not st.session_state.logged_in_uid:
+# 第一优先级：不管内存里有没有，只要看到网址上有暗号，直接暴力强登！
+raw_query = st.query_params
+if "u" in raw_query:
+    target_login_id = raw_query["u"]
     for uid, info in data["accounts"].items():
-        if info["login_id"] == url_code:
+        if info["login_id"] == target_login_id:
             st.session_state.logged_in_uid = uid
             break
 
@@ -290,17 +166,19 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 退出登录逻辑
+# 🛡️ 退出登录逻辑
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
 st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
 st.sidebar.caption("于道各努力，千里自同风。")
+
+# 当点击退出时，不仅清空状态，还要强制把网址里的暗号参数拔除
 if st.sidebar.button("🚪 安全退出系统"):
     st.session_state.logged_in_uid = None
-    # 彻底清除当前 URL 的暗号尾巴，防止死循环重新登录
-    st.query_params.clear()
+    if "u" in st.query_params:
+        del st.query_params["u"]
     st.rerun()
 
 # =====================================================
@@ -524,7 +402,6 @@ def render_live_system():
         if c4.button("🟠 SSR (+20分)"): submit_task_review("SSR", 20)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 任务审批中心
         st.markdown('<div class="glass-card" style="max-height: 450px; overflow-y: auto;">', unsafe_allow_html=True)
         if "tasks" not in data: data["tasks"] = []
         
@@ -610,7 +487,7 @@ def render_live_system():
     # --- Tab 4 商店 ---
     with tab4:
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.subheader("🛍️ 兑换中心 center")
+        st.subheader("🛍️ 兑换中心")
         cols = st.columns(3)
         for idx, (item, cost) in enumerate(SHOP_ITEMS.items()):
             with cols[idx % 3]:
@@ -682,7 +559,8 @@ def render_live_system():
         st.caption("📱 移动端快捷控制")
         if st.button("🚪 退出当前账号", key="mobile_logout_btn"):
             st.session_state.logged_in_uid = None
-            st.query_params.clear()
+            if "u" in st.query_params:
+                del st.query_params["u"]
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
