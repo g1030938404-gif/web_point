@@ -3,7 +3,6 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
-import streamlit_cookies_manager as cm
 
 # =====================================================
 # Supabase 云数据库配置 (云端 Secrets 安全模式)
@@ -28,13 +27,6 @@ SHOP_ITEMS = {
 }
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
-
-# =====================================================
-# 🍪 浏览器 Cookie 记住登录状态引擎 (免密直达)
-# =====================================================
-cookies = cm.CookieManager()
-if not cookies.ready():
-    st.stop() # 等待浏览器 Cookie 握手同步
 
 # =====================================================
 # 🧭 全球服务器无缝锁定北京时间 (UTC+8)
@@ -255,15 +247,18 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🔐 自动登录判定（内存没有就读取 Cookie）
+# 🔐 自动登录判定（iOS 终极暗号无感放行机制）
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
-# 如果内存为空，但浏览器 Cookie 里存了 UID，执行无感自动登录
-saved_uid = cookies.get("saved_login_uid")
-if saved_uid and not st.session_state.logged_in_uid:
-    st.session_state.logged_in_uid = saved_uid
+# 检测 URL 尾巴上是否带有暗号，如：?u=ziyang
+url_code = st.query_params.get("u")
+if url_code and not st.session_state.logged_in_uid:
+    for uid, info in data["accounts"].items():
+        if info["login_id"] == url_code:
+            st.session_state.logged_in_uid = uid
+            break
 
 # =====================================================
 # 登录门户界面
@@ -286,9 +281,6 @@ if not st.session_state.logged_in_uid:
                 matched_uid = uid
                 break
         if matched_uid:
-            # 写入浏览器 Cookie 缓存，有效期自动设为长期
-            cookies["saved_login_uid"] = matched_uid
-            cookies.save()
             st.session_state.logged_in_uid = matched_uid
             st.rerun()
         else:
@@ -298,21 +290,18 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 🛡️ 退出登录逻辑（同步清除内存与 Cookie 锁）
+# 退出登录逻辑
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
-def execute_logout():
-    cookies["saved_login_uid"] = ""
-    cookies.save()
-    st.session_state.logged_in_uid = None
-    st.rerun()
-
 st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
 st.sidebar.caption("于道各努力，千里自同风。")
 if st.sidebar.button("🚪 安全退出系统"):
-    execute_logout()
+    st.session_state.logged_in_uid = None
+    # 彻底清除当前 URL 的暗号尾巴，防止死循环重新登录
+    st.query_params.clear()
+    st.rerun()
 
 # =====================================================
 # ⏱️ ✨ 核心高频引擎：定义 3秒级自动刷新片段
@@ -621,7 +610,7 @@ def render_live_system():
     # --- Tab 4 商店 ---
     with tab4:
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
-        st.subheader("🛍️ 兑换中心")
+        st.subheader("🛍️ 兑换中心 center")
         cols = st.columns(3)
         for idx, (item, cost) in enumerate(SHOP_ITEMS.items()):
             with cols[idx % 3]:
@@ -692,7 +681,9 @@ def render_live_system():
         st.markdown('<div class="glass-card" style="border: 1.5px solid rgba(255, 117, 140, 0.3); text-align: center;">', unsafe_allow_html=True)
         st.caption("📱 移动端快捷控制")
         if st.button("🚪 退出当前账号", key="mobile_logout_btn"):
-            execute_logout()
+            st.session_state.logged_in_uid = None
+            st.query_params.clear()
+            st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
     # 全局足迹动态
