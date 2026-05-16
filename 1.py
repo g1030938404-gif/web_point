@@ -3,6 +3,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
+import streamlit_cookies_manager as cm
 
 # =====================================================
 # Supabase 云数据库配置 (云端 Secrets 安全模式)
@@ -22,16 +23,23 @@ MAX_LOGS = 1000
 
 SHOP_ITEMS = {
     "台球券": 20, "网吧券": 20, "KTV券": 20,
-    "钓鱼券": 20, "麻将券": 30, "包夜券": 60
+    "钓鱼券": 20, "麻将券": 30, "包夜券": 60,
+    "不生气券":60,"和好券":200
 }
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
 
 # =====================================================
-# 🧭 ✨ 强行校准：全球服务器无缝锁定北京时间 (UTC+8)
+# 🍪 浏览器 Cookie 记住登录状态引擎 (免密直达)
+# =====================================================
+cookies = cm.CookieManager()
+if not cookies.ready():
+    st.stop() # 等待浏览器 Cookie 握手同步
+
+# =====================================================
+# 🧭 全球服务器无缝锁定北京时间 (UTC+8)
 # =====================================================
 def get_china_now():
-    # 获取标准 UTC 时间，抹除原本的时区标签，手动加上 8 小时转换为纯净的北京时间
     return datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=8)
 
 # =====================================================
@@ -42,7 +50,7 @@ st.markdown("""
 /* 隐藏默认元素 */
 #MainMenu, footer, header {visibility: hidden;}
 
-/* 全局布局最大宽度限制（电脑端居中，手机端铺满） */
+/* 全局布局最大宽度限制 */
 .block-container {
     padding-top: 1rem !important; 
     padding-bottom: 2rem !important; 
@@ -138,10 +146,6 @@ st.markdown("""
     background-color: rgba(255, 255, 255, 0.9) !important;
     transition: 0.3s !important;
 }
-.stTextInput input:focus, .stSelectbox > div > div:focus {
-    border-color: #ff758c !important;
-    box-shadow: 0 0 0 2px rgba(255,117,140,0.2) !important;
-}
 
 /* 优化所有的自带 st.button */
 .stButton > button {
@@ -170,17 +174,12 @@ button[kind="primary"] {
     padding: 5px;
     background-color: rgba(255, 255, 255, 0.5);
     border-radius: 16px;
-    overflow-x: auto !important;
-    flex-wrap: nowrap !important;
-    -webkit-overflow-scrolling: touch;
 }
 .stTabs [data-baseweb="tab"] {
     border-radius: 12px !important;
     padding: 8px 16px !important;
-    height: auto;
     border: none !important;
     background-color: transparent;
-    white-space: nowrap !important;
 }
 .stTabs [aria-selected="true"] {
     background-color: #fff !important;
@@ -208,10 +207,7 @@ button[kind="primary"] {
         padding-right: 1rem !important;
     }
     .banner-title { font-size: 1.8rem; }
-    .quote-zh { font-size: 1.1rem; }
-    .quote-en { font-size: 0.85rem; }
     .glass-card { padding: 16px; }
-    .glass-card h1 { font-size: 2.2rem !important; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -256,15 +252,22 @@ def save_data(updated_data):
     except Exception as e:
         st.error(f"☁️ 云端数据同步失败: {e}")
 
-# 全局初始化快照
 data = load_data()
 
 # =====================================================
-# 登录界面 (保持静态，节约未登录时的开销)
+# 🔐 自动登录判定（内存没有就读取 Cookie）
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
+# 如果内存为空，但浏览器 Cookie 里存了 UID，执行无感自动登录
+saved_uid = cookies.get("saved_login_uid")
+if saved_uid and not st.session_state.logged_in_uid:
+    st.session_state.logged_in_uid = saved_uid
+
+# =====================================================
+# 登录门户界面
+# =====================================================
 if not st.session_state.logged_in_uid:
     st.markdown("""
     <div class="login-container glass-card">
@@ -283,6 +286,9 @@ if not st.session_state.logged_in_uid:
                 matched_uid = uid
                 break
         if matched_uid:
+            # 写入浏览器 Cookie 缓存，有效期自动设为长期
+            cookies["saved_login_uid"] = matched_uid
+            cookies.save()
             st.session_state.logged_in_uid = matched_uid
             st.rerun()
         else:
@@ -292,19 +298,24 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 🛡️ 架构核心隔离区：在 Fragment 外部渲染全局 st.sidebar
+# 🛡️ 退出登录逻辑（同步清除内存与 Cookie 锁）
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
-st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
-st.sidebar.caption("于道各努力，千里自同风。")
-if st.sidebar.button("🚪 安全退出系统"):
+def execute_logout():
+    cookies["saved_login_uid"] = ""
+    cookies.save()
     st.session_state.logged_in_uid = None
     st.rerun()
 
+st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
+st.sidebar.caption("于道各努力，千里自同风。")
+if st.sidebar.button("🚪 安全退出系统"):
+    execute_logout()
+
 # =====================================================
-# ⏱️ ✨ 核心高频引擎：定义 3秒级自动刷新片段 (仅限主页面容器)
+# ⏱️ ✨ 核心高频引擎：定义 3秒级自动刷新片段
 # =====================================================
 @st.fragment(run_every="3s")
 def render_live_system():
@@ -589,7 +600,7 @@ def render_live_system():
                         st.rerun()
             st.divider()
             
-            pending = [b for b in data["bounties"] if b["creator"] == current_uid and b["status"] == "pending"]
+            pending = [b for b in data["bounties"] if b["creator"] == current_uid Barb["status"] == "pending"]
             st.write("✅ **待我审核：**")
             if not pending: st.caption("暂无待审核")
             for b in pending:
@@ -681,8 +692,7 @@ def render_live_system():
         st.markdown('<div class="glass-card" style="border: 1.5px solid rgba(255, 117, 140, 0.3); text-align: center;">', unsafe_allow_html=True)
         st.caption("📱 移动端快捷控制")
         if st.button("🚪 退出当前账号", key="mobile_logout_btn"):
-            st.session_state.logged_in_uid = None
-            st.rerun()
+            execute_logout()
         st.markdown('</div>', unsafe_allow_html=True)
 
     # 全局足迹动态
