@@ -3,6 +3,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
+import streamlit.components.v1 as components  # 引入原生组件底层通信能力
 
 # =====================================================
 # Supabase 云数据库配置 (云端 Secrets 安全模式)
@@ -248,10 +249,33 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🔐 自动登录判定（URL 持久登录）
+# 🔐 自动登录核心：1. 顶层毫秒级前端硬件免登扫描检测
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
+
+# 强力注入跨沙盒重定向拦截脚本
+components.html("""
+<script>
+try {
+    const autoLoginStr = window.parent.localStorage.getItem("high_yang_autologin");
+    if (autoLoginStr) {
+        const data = JSON.parse(autoLoginStr);
+        if (data.expiry > Date.now()) {
+            const current_url = new URL(window.parent.location.href);
+            // 如果检测到本地有未过期凭证，且当前URL还没有携带此凭证，强制进行静默重定向补全登录
+            if (current_url.searchParams.get("uid") !== data.uid) {
+                current_url.searchParams.set("uid", data.uid);
+                window.parent.location.href = current_url.href;
+            }
+        } else {
+            // 凭证过期，自动销毁
+            window.parent.localStorage.removeItem("high_yang_autologin");
+        }
+    }
+} catch (e) { console.error("硬件免登扫描失败:", e); }
+</script>
+""", height=0, width=0)
 
 query_uid = st.query_params.get("uid")
 
@@ -262,6 +286,15 @@ if query_uid and not st.session_state.logged_in_uid:
 # 登录门户界面
 # =====================================================
 if not st.session_state.logged_in_uid:
+    # 2. 如果检测到有安全退出指令，通知前端浏览器擦除硬件级保存
+    if st.session_state.get("clear_autologin"):
+        components.html("""
+        <script>
+        try { window.parent.localStorage.removeItem("high_yang_autologin"); } catch(e) {}
+        </script>
+        """, height=0, width=0)
+        del st.session_state["clear_autologin"]
+
     st.markdown("""
     <div class="login-container glass-card">
         <h2 style='text-align: center; color: #ff758c; margin-bottom: 10px;'>💌 积分系统</h2>
@@ -270,6 +303,9 @@ if not st.session_state.logged_in_uid:
 
     login_id = st.text_input("账号 / User ID", placeholder="输入账号...")
     pwd = st.text_input("密码 / Password", type="password", placeholder="输入密码...")
+    
+    # 🌟 关键新增：添加桌面完美的免登录开关
+    remember_me = st.checkbox("保持7天免登录 🚀 (勾选完美解决手机桌面图标重复登录问题)", value=True)
 
     st.write("")
     if st.button("✨ 立即登录", type="primary"):
@@ -279,9 +315,11 @@ if not st.session_state.logged_in_uid:
                 matched_uid = uid
                 break
         if matched_uid:
-            # URL 持久登录（iPhone 永久稳定）
             st.query_params["uid"] = matched_uid
             st.session_state.logged_in_uid = matched_uid
+            if remember_me:
+                # 记录在 Session State，待进入系统后立即下发指令给前端
+                st.session_state.save_autologin = matched_uid
             st.rerun()
         else:
             st.error("账号或密码错误 🥺")
@@ -290,7 +328,7 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 🛡️ 退出登录逻辑（同步清除内存与 Cookie 锁）
+# 🛡️ 退出登录逻辑（同步清除内存与本地缓存）
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
@@ -298,6 +336,8 @@ global_current_name = data["accounts"][current_uid]["display_name"]
 def execute_logout():
     st.query_params.clear()
     st.session_state.logged_in_uid = None
+    # 触发彻底清除本地免登标志
+    st.session_state.clear_autologin = True
     st.rerun()
 
 st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
@@ -317,6 +357,20 @@ def render_live_system():
     target_uid = "user2" if current_uid == "user1" else "user1"
     current_name = data["accounts"][current_uid]["display_name"]
     target_name = data["accounts"][target_uid]["display_name"]
+
+    # 3. 登录成功后，如果勾选了免登，这里真正向前端写硬件缓存，生命周期定义为滑动 7 天
+    if st.session_state.get("save_autologin"):
+        uid_to_save = st.session_state.save_autologin
+        expiry_timestamp = int((get_china_now() + timedelta(days=7)).timestamp() * 1000)
+        components.html(f"""
+        <script>
+        try {{
+            const authObj = {{ uid: "{uid_to_save}", expiry: {expiry_timestamp} }};
+            window.parent.localStorage.setItem("high_yang_autologin", JSON.stringify(authObj));
+        }} catch(e) {{ console.error("下发硬件免登缓存失败:", e); }}
+        </script>
+        """, height=0, width=0)
+        del st.session_state["save_autologin"]
 
     def get_today_key(): return get_china_now().strftime("%Y-%m-%d")
 
@@ -385,31 +439,19 @@ def render_live_system():
         while current.strftime("%Y-%m-%d") in dates: streak += 1; current -= timedelta(days=1)
         return streak
 
-    def get_month_points(uid):
-        now_prefix = f"**{get_china_now().strftime('%m-')}"
-        return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
-
-    # =====================================================
-    # 🏆 每周一零点过后 自动结算机制
-    # =====================================================
+    # 每周一自动结算机制
     now_dt = get_china_now()
-    # 生成当前年份与 ISO 周号 (例如: "2026-W21")
     current_week_id = f"{now_dt.year}-W{now_dt.isocalendar()[1]}"
     
     if "last_settled_week" not in data:
-        # 初次部署初始化，标记本周为已结算，防止初次加载时误补发旧积分
         data["last_settled_week"] = current_week_id
         save_data(data)
     elif data["last_settled_week"] != current_week_id:
-        # 进入了新的一周！结算上周（即过去 7 天内）的累积时长
         c_hours = get_week_study_hours(current_uid)
         t_hours = get_week_study_hours(target_uid)
-        
-        # 只有在有人学过习的情况下才结算
         if c_hours > 0 or t_hours > 0:
             time_str = now_dt.strftime('%m-%d %H:%M')
             if c_hours == t_hours:
-                # 极其罕见的浪漫平局情况：两人均加 10 分
                 data["points"][current_uid] += 10
                 data["points"][target_uid] += 10
                 settle_log = f"**{time_str}** | 🏆 **每周结算**：**{current_name}** 与 **{target_name}** 本周学时完美并列！触发双赢奖励 <span style='color:#ff758c; font-weight:bold;'>(各自+10分)</span>"
@@ -418,11 +460,8 @@ def render_live_system():
                 winner_name = current_name if c_hours > t_hours else target_name
                 data["points"][winner_uid] += 10
                 settle_log = f"**{time_str}** | 🏆 **每周结算**：**{winner_name}** 凭本周超强毅力荣获学习 MVP！奖励已到账 <span style='color:#ff758c; font-weight:bold;'>(+10分)</span>"
-            
             data["logs"].insert(0, settle_log)
             data["logs"] = data["logs"][:MAX_LOGS]
-        
-        # 更新周标签并同步云端，确保本周不会重复结算
         data["last_settled_week"] = current_week_id
         save_data(data)
 
@@ -457,9 +496,7 @@ def render_live_system():
         </div>
         """, unsafe_allow_html=True)
 
-    # =====================================================
     # 实时 MVP 称号展现计算
-    # =====================================================
     c_week_hours = get_week_study_hours(current_uid)
     t_week_hours = get_week_study_hours(target_uid)
     if c_week_hours == 0 and t_week_hours == 0:
@@ -469,7 +506,6 @@ def render_live_system():
     else:
         mvp_name = current_name if c_week_hours > t_week_hours else target_name
 
-    # 学习成就榜展示
     c1, c2, c3 = st.columns(3)
     with c1: 
         st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {c_week_hours}h</small><br><small style="color:#2980b9;">{target_name}: {t_week_hours}h</small></div>', unsafe_allow_html=True)
@@ -551,7 +587,6 @@ def render_live_system():
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.subheader("📋 申报完成事项")
         task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献、跑通裂缝识别代码...", key="task_input_name")
-        
         c1, c2, c3, c4 = st.columns(4)
         
         def submit_task_review(level, pts):
@@ -573,14 +608,11 @@ def render_live_system():
         if c4.button("🟠 SSR (+20分)"): submit_task_review("SSR", 20)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 任务审批中心
         st.markdown('<div class="glass-card" style="max-height: 450px; overflow-y: auto;">', unsafe_allow_html=True)
         if "tasks" not in data: data["tasks"] = []
-        
         my_audit_tasks = [t for t in data["tasks"] if t["creator"] == target_uid and t["status"] == "pending"]
         st.write(f"✍️ **待我审核（{target_name} 申报的）：**")
-        if not my_audit_tasks:
-            st.caption("暂无需要你审核的任务 🌟")
+        if not my_audit_tasks: st.caption("暂无需要你审核的任务 🌟")
         for t in my_audit_tasks:
             st.markdown(f"【{t['level']}级】**{t['title']}** (🎁 +{t['points']}分)")
             t_col1, t_col2 = st.columns(2)
@@ -594,7 +626,6 @@ def render_live_system():
                     t["status"] = "rejected"
                     save_data(data)
                     st.rerun()
-                    
         st.divider()
         my_pending_tasks = [t for t in data["tasks"] if t["creator"] == current_uid and t["status"] == "pending"]
         st.write("⏳ **我提交的待审核任务：**")
@@ -637,7 +668,6 @@ def render_live_system():
                         add_log(current_uid, f"拒绝了 {target_name} 的悬赏：{b['title']}", 0) 
                         st.rerun()
             st.divider()
-            
             pending = [b for b in data["bounties"] if b["creator"] == current_uid and b["status"] == "pending"]
             st.write("✅ **待我审核：**")
             if not pending: st.caption("暂无待审核")
