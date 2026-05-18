@@ -248,7 +248,7 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🏆 MVP 每周自动结算算法
+# 🏆 MVP 每周一凌晨自动清账结算算法
 # =====================================================
 if "settled_mvp_weeks" not in data:
     data["settled_mvp_weeks"] = {}
@@ -296,17 +296,13 @@ if prev_week_key not in data["settled_mvp_weeks"]:
         save_data(data)
 
 # =====================================================
-# 🔐 自动登录判定（URL 持久暗号检测）
+# 🔐 标准安全隔离登录状态判定
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
-query_uid = st.query_params.get("uid")
-if query_uid and not st.session_state.logged_in_uid:
-    st.session_state.logged_in_uid = query_uid
-
 # =====================================================
-# 登录门户界面
+# 标准密码登录门户界面（彻底删除免密渠道）
 # =====================================================
 if not st.session_state.logged_in_uid:
     st.markdown("""
@@ -315,53 +311,21 @@ if not st.session_state.logged_in_uid:
         <p style='text-align: center; color: #95a5a6; margin-bottom: 30px; font-size: 0.9rem;'>Love is going hand in hand and becoming a better person for each other.</p>
     """, unsafe_allow_html=True)
 
-    if "show_redirect_gate" not in st.session_state:
-        st.session_state.show_redirect_gate = None
+    login_id = st.text_input("账号 / User ID", placeholder="输入账号...")
+    pwd = st.text_input("密码 / Password", type="password", placeholder="输入密码...")
 
-    if not st.session_state.show_redirect_gate:
-        login_id = st.text_input("账号 / User ID", placeholder="输入账号...")
-        pwd = st.text_input("密码 / Password", type="password", placeholder="输入密码...")
-
-        st.write("")
-        if st.button("✨ 登录", type="primary"):
-            matched_uid = None
-            for uid, info in data["accounts"].items():
-                if info["login_id"] == login_id and info["password"] == pwd:
-                    matched_uid = uid
-                    break
-            if matched_uid:
-                st.session_state.show_redirect_gate = {"uid": matched_uid, "id": login_id}
-                st.rerun()
-            else:
-                st.error("账号或密码错误 🥺")
-                
-        # 一键免密备用直达通道
-        st.divider()
-        st.caption("<p style='text-align:center; color:#95a5a6;'>📱 临时快捷免密直达</p>", unsafe_allow_html=True)
-        m_col1, m_col2 = st.columns(2)
-        with m_col1:
-            if st.button("🌸 高梓洋"):
-                st.query_params["uid"] = "user1"
-                st.session_state.logged_in_uid = "user1"
-                st.rerun()
-        with m_col2:
-            if st.button("✨ 杨雨桐"):
-                st.query_params["uid"] = "user2"
-                st.session_state.logged_in_uid = "user2"
-                st.rerun()
-    else:
-        gate = st.session_state.show_redirect_gate
-        st.success("🎉 验证成功！检测到你在苹果设备上运行。")
-        st.markdown(f"""
-        <div style="background: rgba(255,255,255,0.9); padding: 15px; border-radius: 12px; border: 1px dashed #ff758c; text-align: center; margin: 15px 0;">
-            <p style="color: #2c3e50; font-size: 0.95rem; margin-bottom: 12px;"><b>👇 请点击下方专属链接激活硬映射：</b></p>
-            <a href="?uid={gate['uid']}" target="_self" style="display: inline-block; padding: 10px 20px; background: linear-gradient(135deg, #ff758c 0%, #ff7eb3 100%); color: white; border-radius: 10px; font-weight: bold; text-decoration: none; box-shadow: 0 4px 15px rgba(255,117,140,0.3);">🔗 激活我的永久桌面暗号</a>
-        </div>
-        <p style="color: #7f8c8d; font-size: 0.85rem; text-align: center;">💡 <b>最后一步</b>：点击上方按钮后，网页会发生一次真实物理重刷，刷新完成后，<b>直接在 Safari 中将此页面“添加到主屏幕”</b>。以后在桌面打开就永不脱落、免密直达！</p>
-        """, unsafe_allow_html=True)
-        if st.button("↩️ 返回重新输入"):
-            st.session_state.show_redirect_gate = None
+    st.write("")
+    if st.button("✨ 立即登录", type="primary"):
+        matched_uid = None
+        for uid, info in data["accounts"].items():
+            if info["login_id"] == login_id and info["password"] == pwd:
+                matched_uid = uid
+                break
+        if matched_uid:
+            st.session_state.logged_in_uid = matched_uid
             st.rerun()
+        else:
+            st.error("账号或密码错误 🥺")
 
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
@@ -373,7 +337,6 @@ current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
 def execute_logout():
-    st.query_params.clear()
     st.session_state.logged_in_uid = None
     st.rerun()
 
@@ -639,7 +602,7 @@ def render_live_system():
         for t in my_pending_tasks: st.markdown(f"【{t['level']}级】**{t['title']}** (💰 {t['points']}分) —— *等待对方审核中...*")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Tab 3 悬赏 (✨ 已经把 Barb 彻底斩断并修复) ---
+    # --- Tab 3 悬赏 ---
     with tab3:
         c_pub, c_list = st.columns([1, 1.2])
         with c_pub:
@@ -674,7 +637,6 @@ def render_live_system():
                         st.rerun()
             st.divider()
             
-            # ✨ 这里就是完美修复的 and 拼接位置
             pending = [b for b in data["bounties"] if b["creator"] == current_uid and b["status"] == "pending"]
             st.write("✅ **待我审核：**")
             if not pending: st.caption("暂无待审核")
