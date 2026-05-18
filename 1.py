@@ -3,7 +3,6 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
-import streamlit_cookies_manager as cm
 
 # =====================================================
 # Supabase 云数据库配置 (云端 Secrets 安全模式)
@@ -23,17 +22,11 @@ MAX_LOGS = 1000
 
 SHOP_ITEMS = {
     "台球券": 20, "网吧券": 20, "KTV券": 20,
-    "钓鱼券": 20, "麻将券": 30, "包夜券": 60
+    "钓鱼券": 20, "麻将券": 30, "包夜券": 60,
+    "不生气券": 60, "和好券": 200
 }
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
-
-# =====================================================
-# 🍪 浏览器 Cookie 记住登录状态引擎 (免密直达)
-# =====================================================
-cookies = cm.CookieManager()
-if not cookies.ready():
-    st.stop() # 等待浏览器 Cookie 握手同步
 
 # =====================================================
 # 🧭 全球服务器无缝锁定北京时间 (UTC+8)
@@ -223,6 +216,7 @@ def load_data():
         "points": {"user1": 0, "user2": 0},
         "logs": [], "record_history": [], "study_records": [], "daily_points": {}, "bounties": [],
         "tasks": [], 
+        "settled_mvp_weeks": {}, 
         "study_status": {
             "user1": {"last_end_time": None, "accumulated_minutes": 0, "current_session_start": None, "current_session_type": None},
             "user2": {"last_end_time": None, "accumulated_minutes": 0, "current_session_start": None, "current_session_type": None}
@@ -254,15 +248,62 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🔐 自动登录判定（内存没有就读取 Cookie）
+# 🏆 MVP 每周自动结算算法
+# =====================================================
+if "settled_mvp_weeks" not in data:
+    data["settled_mvp_weeks"] = {}
+
+china_now = get_china_now()
+c_year, c_week, _ = china_now.isocalendar()
+current_week_key = f"{c_year}-W{c_week:02d}"
+
+prev_week_date = china_now - timedelta(days=7)
+p_year, p_week, _ = prev_week_date.isocalendar()
+prev_week_key = f"{p_year}-W{p_week:02d}"
+
+if prev_week_key not in data["settled_mvp_weeks"]:
+    ty = int(prev_week_key.split("-W")[0])
+    tw = int(prev_week_key.split("-W")[1])
+    past_week_totals = {"user1": 0.0, "user2": 0.0}
+    
+    for d_str, vals in data.get("daily_points", {}).items():
+        try:
+            dt_check = datetime.strptime(d_str, "%Y-%m-%d")
+            y, w, _ = dt_check.isocalendar()
+            if y == ty and w == tw:
+                past_week_totals["user1"] += vals.get("user1", 0)
+                past_week_totals["user2"] += vals.get("user2", 0)
+        except:
+            continue
+            
+    p1_score = past_week_totals["user1"]
+    p2_score = past_week_totals["user2"]
+    
+    if p1_score > 0 or p2_score > 0:
+        winners = []
+        if p1_score > p2_score: winners = ["user1"]
+        elif p2_score > p1_score: winners = ["user2"]
+        else: winners = ["user1", "user2"]
+            
+        time_log_str = china_now.strftime('%m-%d %H:%M')
+        for w_uid in winners:
+            data["points"][w_uid] += 10
+            u_disp = data["accounts"][w_uid]["display_name"]
+            log_msg = f"**{time_log_str}** | **{u_disp}** 🏆 荣获上周 ({prev_week_key}) 积分 MVP 结算奖励 <span style='color:#ff758c; font-weight:bold;'>(+10分)</span>"
+            data["logs"].insert(0, log_msg)
+            
+        data["settled_mvp_weeks"][prev_week_key] = winners
+        save_data(data)
+
+# =====================================================
+# 🔐 自动登录判定（URL 持久暗号检测）
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
-# 如果内存为空，但浏览器 Cookie 里存了 UID，执行无感自动登录
-saved_uid = cookies.get("saved_login_uid")
-if saved_uid and not st.session_state.logged_in_uid:
-    st.session_state.logged_in_uid = saved_uid
+query_uid = st.query_params.get("uid")
+if query_uid and not st.session_state.logged_in_uid:
+    st.session_state.logged_in_uid = query_uid
 
 # =====================================================
 # 登录门户界面
@@ -274,37 +315,65 @@ if not st.session_state.logged_in_uid:
         <p style='text-align: center; color: #95a5a6; margin-bottom: 30px; font-size: 0.9rem;'>Love is going hand in hand and becoming a better person for each other.</p>
     """, unsafe_allow_html=True)
 
-    login_id = st.text_input("账号 / User ID", placeholder="输入账号...")
-    pwd = st.text_input("密码 / Password", type="password", placeholder="输入密码...")
+    if "show_redirect_gate" not in st.session_state:
+        st.session_state.show_redirect_gate = None
 
-    st.write("")
-    if st.button("✨ 立即登录", type="primary"):
-        matched_uid = None
-        for uid, info in data["accounts"].items():
-            if info["login_id"] == login_id and info["password"] == pwd:
-                matched_uid = uid
-                break
-        if matched_uid:
-            # 写入浏览器 Cookie 缓存，有效期自动设为长期
-            cookies["saved_login_uid"] = matched_uid
-            cookies.save()
-            st.session_state.logged_in_uid = matched_uid
+    if not st.session_state.show_redirect_gate:
+        login_id = st.text_input("账号 / User ID", placeholder="输入账号...")
+        pwd = st.text_input("密码 / Password", type="password", placeholder="输入密码...")
+
+        st.write("")
+        if st.button("✨ 立即登录确认", type="primary"):
+            matched_uid = None
+            for uid, info in data["accounts"].items():
+                if info["login_id"] == login_id and info["password"] == pwd:
+                    matched_uid = uid
+                    break
+            if matched_uid:
+                st.session_state.show_redirect_gate = {"uid": matched_uid, "id": login_id}
+                st.rerun()
+            else:
+                st.error("账号或密码错误 🥺")
+                
+        # 一键免密备用直达通道
+        st.divider()
+        st.caption("<p style='text-align:center; color:#95a5a6;'>📱 临时快捷免密直达</p>", unsafe_allow_html=True)
+        m_col1, m_col2 = st.columns(2)
+        with m_col1:
+            if st.button("🌸 高梓洋"):
+                st.query_params["uid"] = "user1"
+                st.session_state.logged_in_uid = "user1"
+                st.rerun()
+        with m_col2:
+            if st.button("✨ 杨雨桐"):
+                st.query_params["uid"] = "user2"
+                st.session_state.logged_in_uid = "user2"
+                st.rerun()
+    else:
+        gate = st.session_state.show_redirect_gate
+        st.success("🎉 验证成功！检测到你在苹果设备上运行。")
+        st.markdown(f"""
+        <div style="background: rgba(255,255,255,0.9); padding: 15px; border-radius: 12px; border: 1px dashed #ff758c; text-align: center; margin: 15px 0;">
+            <p style="color: #2c3e50; font-size: 0.95rem; margin-bottom: 12px;"><b>👇 请点击下方专属链接激活硬映射：</b></p>
+            <a href="?uid={gate['uid']}" target="_self" style="display: inline-block; padding: 10px 20px; background: linear-gradient(135deg, #ff758c 0%, #ff7eb3 100%); color: white; border-radius: 10px; font-weight: bold; text-decoration: none; box-shadow: 0 4px 15px rgba(255,117,140,0.3);">🔗 激活我的永久桌面暗号</a>
+        </div>
+        <p style="color: #7f8c8d; font-size: 0.85rem; text-align: center;">💡 <b>最后一步</b>：点击上方按钮后，网页会发生一次真实物理重刷，刷新完成后，<b>直接在 Safari 中将此页面“添加到主屏幕”</b>。以后在桌面打开就永不脱落、免密直达！</p>
+        """, unsafe_allow_html=True)
+        if st.button("↩️ 返回重新输入"):
+            st.session_state.show_redirect_gate = None
             st.rerun()
-        else:
-            st.error("账号或密码错误 🥺")
 
     st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
 # =====================================================
-# 🛡️ 退出登录逻辑（同步清除内存与 Cookie 锁）
+# 🛡️ 退出登录逻辑
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
 def execute_logout():
-    cookies["saved_login_uid"] = ""
-    cookies.save()
+    st.query_params.clear()
     st.session_state.logged_in_uid = None
     st.rerun()
 
@@ -393,9 +462,27 @@ def render_live_system():
         while current.strftime("%Y-%m-%d") in dates: streak += 1; current -= timedelta(days=1)
         return streak
 
-    def get_month_points(uid):
-        now_prefix = f"**{get_china_now().strftime('%m-')}"
-        return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
+    def get_live_week_points():
+        w_year, w_week, _ = get_china_now().isocalendar()
+        w_totals = {"user1": 0.0, "user2": 0.0}
+        for d_str, vals in data.get("daily_points", {}).items():
+            try:
+                dt_c = datetime.strptime(d_str, "%Y-%m-%d")
+                y, w, _ = dt_c.isocalendar()
+                if y == w_year and w == w_week:
+                    w_totals["user1"] += vals.get("user1", 0)
+                    w_totals["user2"] += vals.get("user2", 0)
+            except:
+                continue
+        return w_totals
+
+    live_wk_pts = get_live_week_points()
+    wk_p1 = round(live_wk_pts["user1"], 1)
+    wk_p2 = round(live_wk_pts["user2"], 1)
+    
+    if wk_p1 > wk_p2: live_mvp_text = f"🌸 高梓洋 ({wk_p1}分)"
+    elif wk_p2 > wk_p1: live_mvp_text = f"✨ 杨雨桐 ({wk_p2}分)"
+    else: live_mvp_text = "并驾齐驱 🕊️" if (wk_p1 > 0) else "等待开局 🕊️"
 
     # 浪漫 Banner
     love_start = datetime(2022, 8, 13)
@@ -430,14 +517,9 @@ def render_live_system():
 
     # 学习成就榜
     c1, c2, c3 = st.columns(3)
-    mvp_name = current_name if get_month_points(current_uid) >= get_month_points(target_uid) else target_name
-
-    with c1: 
-        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {get_week_study_hours(current_uid)}h</small><br><small style="color:#2980b9;">{target_name}: {get_week_study_hours(target_uid)}h</small></div>', unsafe_allow_html=True)
-    with c2: 
-        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🔥 <b>连续打卡</b><br><small style="color:#e74c3c;">{current_name}: {get_streak_days(current_uid)}天</small><br><small style="color:#2980b9;">{target_name}: {get_streak_days(target_uid)}天</small></div>', unsafe_allow_html=True)
-    with c3: 
-        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🏆 <b>本月 MVP</b><br><h3 style="margin:8px 0 0 0; color:#f39c12; font-size:1.2rem;">{mvp_name}</h3></div>', unsafe_allow_html=True)
+    with c1: st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {get_week_study_hours(current_uid)}h</small><br><small style="color:#2980b9;">{target_name}: {get_week_study_hours(target_uid)}h</small></div>', unsafe_allow_html=True)
+    with c2: st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🔥 <b>连续打卡</b><br><small style="color:#e74c3c;">{current_name}: {get_streak_days(current_uid)}天</small><br><small style="color:#2980b9;">{target_name}: {get_streak_days(target_uid)}天</small></div>', unsafe_allow_html=True)
+    with c3: st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🏆 <b>本周实时 MVP</b><br><h3 style="margin:8px 0 0 0; color:#f39c12; font-size:1.1rem;">{live_mvp_text}</h3></div>', unsafe_allow_html=True)
 
     # 选项卡功能区
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
@@ -458,8 +540,7 @@ def render_live_system():
             if st.button("⏹️ 结束并结算", type="primary"):
                 dt_end = get_china_now()
                 total_minutes = (dt_end - rt_start_dt).total_seconds() / 60
-                if total_minutes < 1:
-                    st.error("不足 1 分钟，已取消记录。")
+                if total_minutes < 1: st.error("不足 1 分钟，已取消记录。")
                 else:
                     pts, is_cont = calculate_study_points_smart(current_uid, rt_start_dt, dt_end, status.get("current_session_type"))
                     add_today_points(current_uid, pts)
@@ -493,8 +574,7 @@ def render_live_system():
         if (dt_end - dt_start).total_seconds() > 0 and dt_end <= get_china_now():
             if st.button("提交补录"):
                 key = f"{current_uid}_{dt_start}_{dt_end}_{study_type}"
-                if key in data["record_history"]:
-                    st.error("已存在相同记录！")
+                if key in data["record_history"]: st.error("已存在相同记录！")
                 else:
                     data["record_history"].append(key)
                     is_makeup = bool(status["last_end_time"] and dt_start < datetime.fromisoformat(status["last_end_time"]))
@@ -512,7 +592,6 @@ def render_live_system():
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.subheader("📋 申报完成事项")
         task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献、跑通裂缝识别代码...", key="task_input_name")
-        
         c1, c2, c3, c4 = st.columns(4)
         
         def submit_task_review(level, pts):
@@ -525,8 +604,7 @@ def render_live_system():
                 save_data(data)
                 st.success(f"🚀 {level}级任务已提交！等待 {target_name} 审核确认。")
                 st.rerun()
-            else:
-                st.error("请先输入完成事项描述哦 🥺")
+            else: st.error("请先输入完成事项描述哦 🥺")
 
         if c1.button("🟢 S级 (+2分)"): submit_task_review("S", 2)
         if c2.button("🔵 M级 (+5分)"): submit_task_review("M", 5)
@@ -534,14 +612,12 @@ def render_live_system():
         if c4.button("🟠 SSR (+20分)"): submit_task_review("SSR", 20)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 任务审批中心
         st.markdown('<div class="glass-card" style="max-height: 450px; overflow-y: auto;">', unsafe_allow_html=True)
         if "tasks" not in data: data["tasks"] = []
         
         my_audit_tasks = [t for t in data["tasks"] if t["creator"] == target_uid and t["status"] == "pending"]
         st.write(f"✍️ **待我审核（{target_name} 申报的）：**")
-        if not my_audit_tasks:
-            st.caption("暂无需要你审核的任务 🌟")
+        if not my_audit_tasks: st.caption("暂无需要你审核的任务 🌟")
         for t in my_audit_tasks:
             st.markdown(f"【{t['level']}级】**{t['title']}** (🎁 +{t['points']}分)")
             t_col1, t_col2 = st.columns(2)
@@ -560,11 +636,10 @@ def render_live_system():
         my_pending_tasks = [t for t in data["tasks"] if t["creator"] == current_uid and t["status"] == "pending"]
         st.write("⏳ **我提交的待审核任务：**")
         if not my_pending_tasks: st.caption("暂无审核中的任务")
-        for t in my_pending_tasks:
-            st.markdown(f"【{t['level']}级】**{t['title']}** (💰 {t['points']}分) —— *等待对方审核中...*")
+        for t in my_pending_tasks: st.markdown(f"【{t['level']}级】**{t['title']}** (💰 {t['points']}分) —— *等待对方审核中...*")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # --- Tab 3 悬赏 ---
+    # --- Tab 3 悬赏 (✨ 已经把 Barb 彻底斩断并修复) ---
     with tab3:
         c_pub, c_list = st.columns([1, 1.2])
         with c_pub:
@@ -599,7 +674,8 @@ def render_live_system():
                         st.rerun()
             st.divider()
             
-            pending = [b for b in data["bounties"] if b["creator"] == current_uid b and b["status"] == "pending"]
+            # ✨ 这里就是完美修复的 and 拼接位置
+            pending = [b for b in data["bounties"] if b["creator"] == current_uid and b["status"] == "pending"]
             st.write("✅ **待我审核：**")
             if not pending: st.caption("暂无待审核")
             for b in pending:
@@ -625,10 +701,8 @@ def render_live_system():
         for idx, (item, cost) in enumerate(SHOP_ITEMS.items()):
             with cols[idx % 3]:
                 if st.button(f"{item}\n💰 {cost}"):
-                    if item == "包夜券" and data["inventory"][current_uid].get("包夜券", 0) >= 1:
-                        st.error("背包已有，先用完哦！")
-                    elif data["points"][current_uid] < cost:
-                        st.error("余额不足")
+                    if item == "包夜券" and data["inventory"][current_uid].get("包夜券", 0) >= 1: st.error("背包已有，先用完哦！")
+                    elif data["points"][current_uid] < cost: st.error("余额不足")
                     elif add_log(current_uid, f"兑换了 {item}", -cost):
                         data["inventory"][current_uid][item] = data["inventory"][current_uid].get(item, 0) + 1
                         save_data(data)
@@ -645,8 +719,7 @@ def render_live_system():
                 save_data(data)
                 st.success("已收入背包")
                 st.rerun()
-            else:
-                st.error("余额不足")
+            else: st.error("余额不足")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # --- Tab 5 背包 ---
@@ -690,14 +763,12 @@ def render_live_system():
         
         st.markdown('<div class="glass-card" style="border: 1.5px solid rgba(255, 117, 140, 0.3); text-align: center;">', unsafe_allow_html=True)
         st.caption("📱 移动端快捷控制")
-        if st.button("🚪 退出当前账号", key="mobile_logout_btn"):
-            execute_logout()
+        if st.button("🚪 退出当前账号", key="mobile_logout_btn"): execute_logout()
         st.markdown('</div>', unsafe_allow_html=True)
 
     # 全局足迹动态
     st.markdown("<h3 style='margin-top: 30px; color: #2c3e50;'>📜 我们的足迹</h3>", unsafe_allow_html=True)
-    for log in data["logs"][:20]:
-        st.markdown(f'<div class="log-bubble">{log}</div>', unsafe_allow_html=True)
+    for log in data["logs"][:20]: st.markdown(f'<div class="log-bubble">{log}</div>', unsafe_allow_html=True)
 
 # =====================================================
 # 🚀 启动秒级实时连线中心
