@@ -28,6 +28,10 @@ SHOP_ITEMS = {
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
 
+# =====================================================
+# 🛠️ 第一步：引入前端组件支持
+# =====================================================
+import streamlit.components.v1 as components
 
 # =====================================================
 # 🧭 全球服务器无缝锁定北京时间 (UTC+8)
@@ -248,52 +252,42 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🔐 自动登录核心控制区 (用顶级 DOM 穿透彻底解封沙盒)
+# 📱 第二步：iPhone 本地永久登录缓存（localStorage）
+# =====================================================
+components.html(
+    """
+    <script>
+    const uid = window.location.search.split("uid=")[1];
+
+    if (uid) {
+        localStorage.setItem("saved_uid", uid);
+    }
+
+    const savedUid = localStorage.getItem("saved_uid");
+
+    if (savedUid && !window.location.search.includes("uid=")) {
+        window.location.href = window.location.origin + window.location.pathname + "?uid=" + savedUid;
+    }
+    </script>
+    """,
+    height=0,
+)
+
+# =====================================================
+# 🔐 自动登录判定（URL 持久登录）
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
 query_uid = st.query_params.get("uid")
 
-# 1. 顶级启动检测：如果全系统处于未登录状态，通过底层原生标签报错钩子直接在顶级窗口读取硬件缓存
-if not st.session_state.logged_in_uid and not query_uid and not st.session_state.get("just_logged_out"):
-    st.markdown("""
-    <img src="x" onerror="
-        try {
-            const cacheData = localStorage.getItem('high_yang_uid_v2');
-            if (cacheData) {
-                const parsed = JSON.parse(cacheData);
-                if (parsed.expiry > Date.now()) {
-                    const url = new URL(window.location.href);
-                    url.searchParams.set('uid', parsed.uid);
-                    window.location.href = url.href;
-                } else {
-                    localStorage.removeItem('high_yang_uid_v2');
-                }
-            }
-        } catch(e) {}
-    " style="display:none; width:0; height:0;">
-    """, unsafe_allow_html=True)
-
-# 2. 补全会话拦截
 if query_uid and not st.session_state.logged_in_uid:
     st.session_state.logged_in_uid = query_uid
-    if "just_logged_out" in st.session_state:
-        del st.session_state["just_logged_out"]
 
 # =====================================================
 # 登录门户界面
 # =====================================================
 if not st.session_state.logged_in_uid:
-    # 如果检测到刚触发了登出清理命令，利用顶级穿透彻底粉碎本地持久缓存
-    if st.session_state.get("clear_local_uid"):
-        st.markdown("""
-        <img src="x" onerror="try{localStorage.removeItem('high_yang_uid_v2');}catch(e){}" style="display:none; width:0; height:0;">
-        """, unsafe_allow_html=True)
-        del st.session_state["clear_local_uid"]
-        if "just_logged_out" in st.session_state:
-            del st.session_state["just_logged_out"]
-
     st.markdown("""
     <div class="login-container glass-card">
         <h2 style='text-align: center; color: #ff758c; margin-bottom: 10px;'>💌 积分系统</h2>
@@ -302,7 +296,6 @@ if not st.session_state.logged_in_uid:
 
     login_id = st.text_input("账号 / User ID", placeholder="输入账号...")
     pwd = st.text_input("密码 / Password", type="password", placeholder="输入密码...")
-    remember_me = st.checkbox("保持7天自动登录 🚀 (完美适配手机桌面图标/后台清除不掉线)", value=True)
 
     st.write("")
     if st.button("✨ 立即登录", type="primary"):
@@ -312,10 +305,9 @@ if not st.session_state.logged_in_uid:
                 matched_uid = uid
                 break
         if matched_uid:
+            # URL 持久登录（iPhone 永久稳定）
             st.query_params["uid"] = matched_uid
             st.session_state.logged_in_uid = matched_uid
-            if remember_me:
-                st.session_state["set_local_uid"] = matched_uid
             st.rerun()
         else:
             st.error("账号或密码错误 🥺")
@@ -324,16 +316,24 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 🛡️ 退出登录逻辑（同步清除内存与硬件缓存）
+# 🛡️ 第三步：修改后的退出登录逻辑（同步清除 localStorage）
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
 def execute_logout():
     st.query_params.clear()
+
+    components.html(
+        """
+        <script>
+        localStorage.removeItem("saved_uid");
+        </script>
+        """,
+        height=0,
+    )
+
     st.session_state.logged_in_uid = None
-    st.session_state.just_logged_out = True
-    st.session_state.clear_local_uid = True
     st.rerun()
 
 st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
@@ -353,20 +353,6 @@ def render_live_system():
     target_uid = "user2" if current_uid == "user1" else "user1"
     current_name = data["accounts"][current_uid]["display_name"]
     target_name = data["accounts"][target_uid]["display_name"]
-
-    # 🌟 核心拦截：当检测到需要持久化本地缓存时，通过原生 DOM 级直接下发
-    if st.session_state.get("set_local_uid"):
-        uid_to_save = st.session_state["set_local_uid"]
-        expiry_time = int((get_china_now() + timedelta(days=7)).timestamp() * 1000)
-        st.markdown(f"""
-        <img src="x" onerror='
-            try {{
-                const saveObj = {{ uid: "{uid_to_save}", expiry: {expiry_time} }};
-                localStorage.setItem("high_yang_uid_v2", JSON.stringify(saveObj));
-            }} catch(e) {{}}
-        ' style="display:none; width:0; height:0;">
-        """, unsafe_allow_html=True)
-        del st.session_state["set_local_uid"]
 
     def get_today_key(): return get_china_now().strftime("%Y-%m-%d")
 
@@ -435,7 +421,13 @@ def render_live_system():
         while current.strftime("%Y-%m-%d") in dates: streak += 1; current -= timedelta(days=1)
         return streak
 
-    # 每周一自动结算机制
+    def get_month_points(uid):
+        now_prefix = f"**{get_china_now().strftime('%m-')}"
+        return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
+
+    # =====================================================
+    # 🏆 每周一零点过后 自动结算机制
+    # =====================================================
     now_dt = get_china_now()
     current_week_id = f"{now_dt.year}-W{now_dt.isocalendar()[1]}"
     
@@ -445,6 +437,7 @@ def render_live_system():
     elif data["last_settled_week"] != current_week_id:
         c_hours = get_week_study_hours(current_uid)
         t_hours = get_week_study_hours(target_uid)
+        
         if c_hours > 0 or t_hours > 0:
             time_str = now_dt.strftime('%m-%d %H:%M')
             if c_hours == t_hours:
@@ -456,8 +449,10 @@ def render_live_system():
                 winner_name = current_name if c_hours > t_hours else target_name
                 data["points"][winner_uid] += 10
                 settle_log = f"**{time_str}** | 🏆 **每周结算**：**{winner_name}** 凭本周超强毅力荣获学习 MVP！奖励已到账 <span style='color:#ff758c; font-weight:bold;'>(+10分)</span>"
+            
             data["logs"].insert(0, settle_log)
             data["logs"] = data["logs"][:MAX_LOGS]
+        
         data["last_settled_week"] = current_week_id
         save_data(data)
 
@@ -492,7 +487,9 @@ def render_live_system():
         </div>
         """, unsafe_allow_html=True)
 
+    # =====================================================
     # 实时 MVP 称号展现计算
+    # =====================================================
     c_week_hours = get_week_study_hours(current_uid)
     t_week_hours = get_week_study_hours(target_uid)
     if c_week_hours == 0 and t_week_hours == 0:
@@ -502,6 +499,7 @@ def render_live_system():
     else:
         mvp_name = current_name if c_week_hours > t_week_hours else target_name
 
+    # 学习成就榜展示
     c1, c2, c3 = st.columns(3)
     with c1: 
         st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {c_week_hours}h</small><br><small style="color:#2980b9;">{target_name}: {t_week_hours}h</small></div>', unsafe_allow_html=True)
@@ -583,6 +581,7 @@ def render_live_system():
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         st.subheader("📋 申报完成事项")
         task_name = st.text_input("完成事项描述：", placeholder="比如：读几篇文献、跑通裂缝识别代码...", key="task_input_name")
+        
         c1, c2, c3, c4 = st.columns(4)
         
         def submit_task_review(level, pts):
@@ -604,11 +603,14 @@ def render_live_system():
         if c4.button("🟠 SSR (+20分)"): submit_task_review("SSR", 20)
         st.markdown('</div>', unsafe_allow_html=True)
 
+        # 任务审批中心
         st.markdown('<div class="glass-card" style="max-height: 450px; overflow-y: auto;">', unsafe_allow_html=True)
         if "tasks" not in data: data["tasks"] = []
+        
         my_audit_tasks = [t for t in data["tasks"] if t["creator"] == target_uid and t["status"] == "pending"]
         st.write(f"✍️ **待我审核（{target_name} 申报的）：**")
-        if not my_audit_tasks: st.caption("暂无需要你审核的任务 🌟")
+        if not my_audit_tasks:
+            st.caption("暂无需要你审核的任务 🌟")
         for t in my_audit_tasks:
             st.markdown(f"【{t['level']}级】**{t['title']}** (🎁 +{t['points']}分)")
             t_col1, t_col2 = st.columns(2)
@@ -622,6 +624,7 @@ def render_live_system():
                     t["status"] = "rejected"
                     save_data(data)
                     st.rerun()
+                    
         st.divider()
         my_pending_tasks = [t for t in data["tasks"] if t["creator"] == current_uid and t["status"] == "pending"]
         st.write("⏳ **我提交的待审核任务：**")
@@ -664,6 +667,7 @@ def render_live_system():
                         add_log(current_uid, f"拒绝了 {target_name} 的悬赏：{b['title']}", 0) 
                         st.rerun()
             st.divider()
+            
             pending = [b for b in data["bounties"] if b["creator"] == current_uid and b["status"] == "pending"]
             st.write("✅ **待我审核：**")
             if not pending: st.caption("暂无待审核")
