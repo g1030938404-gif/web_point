@@ -3,6 +3,11 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
+# =====================================================
+# 🛠️ 第一步：引入设备特征码与前端组件
+# =====================================================
+import uuid
+import streamlit.components.v1 as components
 
 # =====================================================
 # Supabase 云数据库配置 (云端 Secrets 安全模式)
@@ -28,10 +33,6 @@ SHOP_ITEMS = {
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
 
-# =====================================================
-# 🛠️ 第一步：引入前端组件支持
-# =====================================================
-import streamlit.components.v1 as components
 
 # =====================================================
 # 🧭 全球服务器无缝锁定北京时间 (UTC+8)
@@ -213,6 +214,7 @@ button[kind="primary"] {
 # 云端数据流底层通信
 # =====================================================
 def load_data():
+    # 第三步：修改 default_data 结构，增加信任设备映射表
     default_data = {
         "accounts": {
             "user1": {"login_id": "ziyang", "password": "123", "display_name": "高梓洋"},
@@ -226,7 +228,8 @@ def load_data():
             "user2": {"last_end_time": None, "accumulated_minutes": 0, "current_session_start": None, "current_session_type": None}
         },
         "inventory": {"user1": {}, "user2": {}},
-        "usage_limits": {"user1": {}, "user2": {}}
+        "usage_limits": {"user1": {}, "user2": {}},
+        "trusted_devices": {}
     }
     try:
         response = supabase.table("points_system").select("config_data").eq("id", 1).execute()
@@ -252,37 +255,35 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 📱 第二步：iPhone 本地永久登录缓存（localStorage）
+# 📱 第二步：获取设备唯一 ID（iPhone 永久登录）
 # =====================================================
-components.html(
-    """
-    <script>
-    const uid = window.location.search.split("uid=")[1];
+device_id = st.query_params.get("device")
 
-    if (uid) {
-        localStorage.setItem("saved_uid", uid);
-    }
+if not device_id:
+    new_device_id = str(uuid.uuid4())
 
-    const savedUid = localStorage.getItem("saved_uid");
+    components.html(
+        f"""
+        <script>
+        window.parent.location.search = "?device={new_device_id}";
+        </script>
+        """,
+        height=0,
+    )
 
-    if (savedUid && !window.location.search.includes("uid=")) {
-        window.location.href = window.location.origin + window.location.pathname + "?uid=" + savedUid;
-    }
-    </script>
-    """,
-    height=0,
-)
+    st.stop()
 
 # =====================================================
-# 🔐 自动登录判定（URL 持久登录）
+# 🔐 第四步：替换整个登录判定（优先读取已信任设备）
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
-query_uid = st.query_params.get("uid")
+# 优先读取已信任设备
+trusted_uid = data.get("trusted_devices", {}).get(device_id)
 
-if query_uid and not st.session_state.logged_in_uid:
-    st.session_state.logged_in_uid = query_uid
+if trusted_uid:
+    st.session_state.logged_in_uid = trusted_uid
 
 # =====================================================
 # 登录门户界面
@@ -304,9 +305,13 @@ if not st.session_state.logged_in_uid:
             if info["login_id"] == login_id and info["password"] == pwd:
                 matched_uid = uid
                 break
+        
+        # 第五步：登录成功后执行设备永久绑定
         if matched_uid:
-            # URL 持久登录（iPhone 永久稳定）
-            st.query_params["uid"] = matched_uid
+            # 设备永久绑定
+            data["trusted_devices"][device_id] = matched_uid
+            save_data(data)
+
             st.session_state.logged_in_uid = matched_uid
             st.rerun()
         else:
@@ -316,22 +321,15 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 🛡️ 第三步：修改后的退出登录逻辑（同步清除 localStorage）
+# 🛡️ 第六步：修改退出登录（从数据库解绑当前设备）
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
 def execute_logout():
-    st.query_params.clear()
-
-    components.html(
-        """
-        <script>
-        localStorage.removeItem("saved_uid");
-        </script>
-        """,
-        height=0,
-    )
+    if device_id in data["trusted_devices"]:
+        del data["trusted_devices"][device_id]
+        save_data(data)
 
     st.session_state.logged_in_uid = None
     st.rerun()
