@@ -241,30 +241,59 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🔐 URL 私密 Token 身份准入拦截器
+# 🔐 URL 私密 Token 身份准入高阶拦截器 (含智能兼容与兜底)
 # =====================================================
 TOKEN_MAP = {
     "zy_k29xas81": "user1",  # 高梓洋 专属
     "yt_p91xla22": "user2"   # 杨雨桐 专属
 }
 
-# 实时获取当前 URL 后的 token 参数
-query_token = st.query_params.get("token")
+# 1. 兼容性提取：支持纯文本和包裹列表的解析，并去除前后空格
+raw_token = st.query_params.get("token")
+url_token = None
+if isinstance(raw_token, list):
+    url_token = raw_token[0] if raw_token else None
+elif raw_token:
+    url_token = raw_token
 
-if not query_token or query_token not in TOKEN_MAP:
+if url_token:
+    url_token = str(url_token).strip()
+
+# 2. 状态机：如果通过 URL 成功获取有效 Token，直接存入 Session 供全局高稳调用
+if url_token in TOKEN_MAP:
+    st.session_state.current_token = url_token
+
+# 3. 兜底判定：如果 URL 丢失或被 iOS 剥离，检查内存；若均无效，展示“极简智能准入卡”
+active_token = st.session_state.get("current_token")
+
+if not active_token or active_token not in TOKEN_MAP:
     st.markdown("""
-    <div style='text-align: center; margin-top: 15vh; padding: 40px;' class='glass-card'>
-        <h2 style='color: #e74c3c;'>🔒 访问受限</h2>
-        <p style='color: #7f8c8d; margin-top: 10px;'>此系统为私密空间，请使用您各自的<b>专属私密链接</b>直接进入。</p>
+    <div style='text-align: center; margin-top: 8vh; padding: 35px;' class='glass-card'>
+        <h2 style='color: #ff758c; margin-bottom: 12px;'>🔒 专属私密空间</h2>
+        <p style='color: #95a5a6; font-size: 0.95rem; line-height:1.6;'>
+            当前未检测到有效访问令牌。<br>
+            若您是在手机桌面直接打开，可能由于系统限制导致链接参数丢失，请在下方直接输入您的专属 Token 即可进入。
+        </p>
     </div>
     """, unsafe_allow_html=True)
+    
+    # 极简单行准入
+    input_token = st.text_input("🔑 请输入您的私密 Token：", type="password", placeholder="输入您的专属验证口令...")
+    if st.button("✨ 确认进入空间", type="primary"):
+        cleaned_input = input_token.strip()
+        if cleaned_input in TOKEN_MAP:
+            st.session_state.current_token = cleaned_input
+            st.query_params["token"] = cleaned_input  # 反向写回 URL 增强刷新稳定性
+            st.rerun()
+        else:
+            st.error("Token 无效，请检查拼写是否正确哦 🥺")
     st.stop()
 
-# 成功解析当前登录用户身份
-global_current_uid = TOKEN_MAP[query_token]
+# 锁定最终合法的 UID 身份
+global_current_uid = TOKEN_MAP[active_token]
 global_current_name = data["accounts"][global_current_uid]["display_name"]
 
-# 侧边栏身份常驻显示
+# 侧边栏常驻欢迎
 st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
 st.sidebar.caption("于道各努力，千里自同风。")
 
@@ -277,8 +306,10 @@ def render_live_system():
     global data
     data = load_data() 
 
-    # 从 URL 级别实时提取，确保多端沙盒隔离
-    current_uid = TOKEN_MAP[st.query_params.get("token")]
+    # 统一采用 Session State 安全令牌，隔离各种沙盒环境的 URL 参数突变
+    current_uid = st.session_state.get("current_token")
+    current_uid = TOKEN_MAP[current_uid]
+    
     target_uid = "user2" if current_uid == "user1" else "user1"
     current_name = data["accounts"][current_uid]["display_name"]
     target_name = data["accounts"][target_uid]["display_name"]
@@ -373,7 +404,7 @@ def render_live_system():
                 winner_uid = current_uid if c_hours > t_hours else target_uid
                 winner_name = current_name if c_hours > t_hours else target_name
                 data["points"][winner_uid] += 10
-                settle_log = f"**{time_str}** | 🏆 **每周结算**：**{winner_name}** 凭本周超强毅力荣获学习 MVP！奖励已到账 <span style='color:#ff758c; font-weight:bold;'>(+10分)</span>"
+                settle_log = f"**{time_str}** | 🏆 **每周结算**：**{winner_name}** 凭本周超强毅力荣获 learning MVP！奖励已到账 <span style='color:#ff758c; font-weight:bold;'>(+10分)</span>"
             
             data["logs"].insert(0, settle_log)
             data["logs"] = data["logs"][:MAX_LOGS]
@@ -666,7 +697,6 @@ def render_live_system():
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         with st.form("set_f"):
             n_name = st.text_input("昵称 / Display Name", value=current_name)
-            # 账号与密码已作为云端冷备份保留，不影响日常无感登录
             n_log = st.text_input("备用登录账号 / Login ID", value=data["accounts"][current_uid]["login_id"])
             n_pwd = st.text_input("备用密码 / Password", value=data["accounts"][current_uid]["password"], type="password")
             if st.form_submit_button("保存设置", type="primary"):
