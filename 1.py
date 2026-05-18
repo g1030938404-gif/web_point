@@ -23,7 +23,7 @@ MAX_LOGS = 1000
 SHOP_ITEMS = {
     "台球券": 20, "网吧券": 20, "KTV券": 20,
     "钓鱼券": 20, "麻将券": 30, "包夜券": 60,
-    "不生气券":60,"和好券":200
+    "不生气券": 60, "和好券": 200
 }
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
@@ -123,13 +123,6 @@ st.markdown("""
     font-size: 0.9rem;
     font-weight: bold;
     box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-}
-
-/* 登录框居中魔法 */
-.login-container {
-    max-width: 400px;
-    margin: 10vh auto;
-    padding: 40px 30px;
 }
 
 /* 优化输入框和下拉框 */
@@ -248,62 +241,33 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🔐 自动登录判定（URL 持久登录）
+# 🔐 URL 私密 Token 身份准入拦截器
 # =====================================================
-if "logged_in_uid" not in st.session_state:
-    st.session_state.logged_in_uid = None
+TOKEN_MAP = {
+    "zy_k29xas81": "user1",  # 高梓洋 专属
+    "yt_p91xla22": "user2"   # 杨雨桐 专属
+}
 
-query_uid = st.query_params.get("uid")
+# 实时获取当前 URL 后的 token 参数
+query_token = st.query_params.get("token")
 
-if query_uid and not st.session_state.logged_in_uid:
-    st.session_state.logged_in_uid = query_uid
-
-# =====================================================
-# 登录门户界面
-# =====================================================
-if not st.session_state.logged_in_uid:
+if not query_token or query_token not in TOKEN_MAP:
     st.markdown("""
-    <div class="login-container glass-card">
-        <h2 style='text-align: center; color: #ff758c; margin-bottom: 10px;'>💌 积分系统</h2>
-        <p style='text-align: center; color: #95a5a6; margin-bottom: 30px; font-size: 0.9rem;'>Love is going hand in hand and becoming a better person for each other.</p>
+    <div style='text-align: center; margin-top: 15vh; padding: 40px;' class='glass-card'>
+        <h2 style='color: #e74c3c;'>🔒 访问受限</h2>
+        <p style='color: #7f8c8d; margin-top: 10px;'>此系统为私密空间，请使用您各自的<b>专属私密链接</b>直接进入。</p>
+    </div>
     """, unsafe_allow_html=True)
-
-    login_id = st.text_input("账号 / User ID", placeholder="输入账号...")
-    pwd = st.text_input("密码 / Password", type="password", placeholder="输入密码...")
-
-    st.write("")
-    if st.button("✨ 立即登录", type="primary"):
-        matched_uid = None
-        for uid, info in data["accounts"].items():
-            if info["login_id"] == login_id and info["password"] == pwd:
-                matched_uid = uid
-                break
-        if matched_uid:
-            # URL 持久登录（iPhone 永久稳定）
-            st.query_params["uid"] = matched_uid
-            st.session_state.logged_in_uid = matched_uid
-            st.rerun()
-        else:
-            st.error("账号或密码错误 🥺")
-
-    st.markdown("</div>", unsafe_allow_html=True)
     st.stop()
 
-# =====================================================
-# 🛡️ 退出登录逻辑（同步清除内存与 Cookie 锁）
-# =====================================================
-current_uid = st.session_state.logged_in_uid
-global_current_name = data["accounts"][current_uid]["display_name"]
+# 成功解析当前登录用户身份
+global_current_uid = TOKEN_MAP[query_token]
+global_current_name = data["accounts"][global_current_uid]["display_name"]
 
-def execute_logout():
-    st.query_params.clear()
-    st.session_state.logged_in_uid = None
-    st.rerun()
-
+# 侧边栏身份常驻显示
 st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
 st.sidebar.caption("于道各努力，千里自同风。")
-if st.sidebar.button("🚪 安全退出系统"):
-    execute_logout()
+
 
 # =====================================================
 # ⏱️ ✨ 核心高频引擎：定义 3秒级自动刷新片段
@@ -313,7 +277,8 @@ def render_live_system():
     global data
     data = load_data() 
 
-    current_uid = st.session_state.logged_in_uid
+    # 从 URL 级别实时提取，确保多端沙盒隔离
+    current_uid = TOKEN_MAP[st.query_params.get("token")]
     target_uid = "user2" if current_uid == "user1" else "user1"
     current_name = data["accounts"][current_uid]["display_name"]
     target_name = data["accounts"][target_uid]["display_name"]
@@ -385,31 +350,22 @@ def render_live_system():
         while current.strftime("%Y-%m-%d") in dates: streak += 1; current -= timedelta(days=1)
         return streak
 
-    def get_month_points(uid):
-        now_prefix = f"**{get_china_now().strftime('%m-')}"
-        return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
-
     # =====================================================
     # 🏆 每周一零点过后 自动结算机制
     # =====================================================
     now_dt = get_china_now()
-    # 生成当前年份与 ISO 周号 (例如: "2026-W21")
     current_week_id = f"{now_dt.year}-W{now_dt.isocalendar()[1]}"
     
     if "last_settled_week" not in data:
-        # 初次部署初始化，标记本周为已结算，防止初次加载时误补发旧积分
         data["last_settled_week"] = current_week_id
         save_data(data)
     elif data["last_settled_week"] != current_week_id:
-        # 进入了新的一周！结算上周（即过去 7 天内）的累积时长
         c_hours = get_week_study_hours(current_uid)
         t_hours = get_week_study_hours(target_uid)
         
-        # 只有在有人学过习的情况下才结算
         if c_hours > 0 or t_hours > 0:
             time_str = now_dt.strftime('%m-%d %H:%M')
             if c_hours == t_hours:
-                # 极其罕见的浪漫平局情况：两人均加 10 分
                 data["points"][current_uid] += 10
                 data["points"][target_uid] += 10
                 settle_log = f"**{time_str}** | 🏆 **每周结算**：**{current_name}** 与 **{target_name}** 本周学时完美并列！触发双赢奖励 <span style='color:#ff758c; font-weight:bold;'>(各自+10分)</span>"
@@ -422,7 +378,6 @@ def render_live_system():
             data["logs"].insert(0, settle_log)
             data["logs"] = data["logs"][:MAX_LOGS]
         
-        # 更新周标签并同步云端，确保本周不会重复结算
         data["last_settled_week"] = current_week_id
         save_data(data)
 
@@ -457,9 +412,7 @@ def render_live_system():
         </div>
         """, unsafe_allow_html=True)
 
-    # =====================================================
-    # 实时 MVP 称号展现计算
-    # =====================================================
+    # 实时 MVP 计算
     c_week_hours = get_week_study_hours(current_uid)
     t_week_hours = get_week_study_hours(target_uid)
     if c_week_hours == 0 and t_week_hours == 0:
@@ -469,7 +422,7 @@ def render_live_system():
     else:
         mvp_name = current_name if c_week_hours > t_week_hours else target_name
 
-    # 学习成就榜展示
+    # 学习成就榜
     c1, c2, c3 = st.columns(3)
     with c1: 
         st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {c_week_hours}h</small><br><small style="color:#2980b9;">{target_name}: {t_week_hours}h</small></div>', unsafe_allow_html=True)
@@ -478,7 +431,6 @@ def render_live_system():
     with c3: 
         st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🏆 <b>本周 MVP</b><br><h3 style="margin:8px 0 0 0; color:#f39c12; font-size:1.2rem;">{mvp_name}</h3></div>', unsafe_allow_html=True)
 
-    # 选项卡功能区
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
     tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["⏱️ 学习", "📋 任务", "💰 悬赏", "🎁 商店", "🎒 背包", "⚙️ 设置"])
 
@@ -573,7 +525,6 @@ def render_live_system():
         if c4.button("🟠 SSR (+20分)"): submit_task_review("SSR", 20)
         st.markdown('</div>', unsafe_allow_html=True)
 
-        # 任务审批中心
         st.markdown('<div class="glass-card" style="max-height: 450px; overflow-y: auto;">', unsafe_allow_html=True)
         if "tasks" not in data: data["tasks"] = []
         
@@ -715,8 +666,9 @@ def render_live_system():
         st.markdown('<div class="glass-card">', unsafe_allow_html=True)
         with st.form("set_f"):
             n_name = st.text_input("昵称 / Display Name", value=current_name)
-            n_log = st.text_input("登录账号 / Login ID", value=data["accounts"][current_uid]["login_id"])
-            n_pwd = st.text_input("密码 / Password", value=data["accounts"][current_uid]["password"], type="password")
+            # 账号与密码已作为云端冷备份保留，不影响日常无感登录
+            n_log = st.text_input("备用登录账号 / Login ID", value=data["accounts"][current_uid]["login_id"])
+            n_pwd = st.text_input("备用密码 / Password", value=data["accounts"][current_uid]["password"], type="password")
             if st.form_submit_button("保存设置", type="primary"):
                 if any(uid != current_uid and info["login_id"] == n_log for uid, info in data["accounts"].items()):
                     st.error("账号名冲突！")
@@ -725,12 +677,6 @@ def render_live_system():
                     save_data(data)
                     st.success("已生效！")
                     st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
-        
-        st.markdown('<div class="glass-card" style="border: 1.5px solid rgba(255, 117, 140, 0.3); text-align: center;">', unsafe_allow_html=True)
-        st.caption("📱 移动端快捷控制")
-        if st.button("🚪 退出当前账号", key="mobile_logout_btn"):
-            execute_logout()
         st.markdown('</div>', unsafe_allow_html=True)
 
     # 全局足迹动态
