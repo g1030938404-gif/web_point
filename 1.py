@@ -3,6 +3,7 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
+import streamlit_cookies_manager as cm
 
 # =====================================================
 # Supabase 云数据库配置 (云端 Secrets 安全模式)
@@ -22,12 +23,17 @@ MAX_LOGS = 1000
 
 SHOP_ITEMS = {
     "台球券": 20, "网吧券": 20, "KTV券": 20,
-    "钓鱼券": 20, "麻将券": 30, "包夜券": 60,
-    "不生气券":60,"和好券":200
+    "钓鱼券": 20, "麻将券": 30, "包夜券": 60
 }
 
 st.set_page_config(page_title="高羊积分系统", page_icon="💌", layout="wide")
 
+# =====================================================
+# 🍪 浏览器 Cookie 记住登录状态引擎 (免密直达)
+# =====================================================
+cookies = cm.CookieManager()
+if not cookies.ready():
+    st.stop() # 等待浏览器 Cookie 握手同步
 
 # =====================================================
 # 🧭 全球服务器无缝锁定北京时间 (UTC+8)
@@ -248,15 +254,15 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🔐 自动登录判定（URL 持久登录）
+# 🔐 自动登录判定（内存没有就读取 Cookie）
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
-query_uid = st.query_params.get("uid")
-
-if query_uid and not st.session_state.logged_in_uid:
-    st.session_state.logged_in_uid = query_uid
+# 如果内存为空，但浏览器 Cookie 里存了 UID，执行无感自动登录
+saved_uid = cookies.get("saved_login_uid")
+if saved_uid and not st.session_state.logged_in_uid:
+    st.session_state.logged_in_uid = saved_uid
 
 # =====================================================
 # 登录门户界面
@@ -279,8 +285,9 @@ if not st.session_state.logged_in_uid:
                 matched_uid = uid
                 break
         if matched_uid:
-            # URL 持久登录（iPhone 永久稳定）
-            st.query_params["uid"] = matched_uid
+            # 写入浏览器 Cookie 缓存，有效期自动设为长期
+            cookies["saved_login_uid"] = matched_uid
+            cookies.save()
             st.session_state.logged_in_uid = matched_uid
             st.rerun()
         else:
@@ -296,7 +303,8 @@ current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
 def execute_logout():
-    st.query_params.clear()
+    cookies["saved_login_uid"] = ""
+    cookies.save()
     st.session_state.logged_in_uid = None
     st.rerun()
 
@@ -591,8 +599,7 @@ def render_live_system():
                         st.rerun()
             st.divider()
             
-            pending = [b for b in data["bounties"] 
-                       if b["creator"] == current_uid and b["status"] == "pending"]
+            pending = [b for b in data["bounties"] if b["creator"] == current_uid Barb["status"] == "pending"]
             st.write("✅ **待我审核：**")
             if not pending: st.caption("暂无待审核")
             for b in pending:
