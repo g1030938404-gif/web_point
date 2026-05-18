@@ -1,7 +1,6 @@
 import streamlit as st
 import json
 import os
-import uuid
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
@@ -223,8 +222,7 @@ def load_data():
             "user2": {"last_end_time": None, "accumulated_minutes": 0, "current_session_start": None, "current_session_type": None}
         },
         "inventory": {"user1": {}, "user2": {}},
-        "usage_limits": {"user1": {}, "user2": {}},
-        "trusted_devices": {}
+        "usage_limits": {"user1": {}, "user2": {}}
     }
     try:
         response = supabase.table("points_system").select("config_data").eq("id", 1).execute()
@@ -250,29 +248,15 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 📱 本地设备永久登录（稳定版）
-# =====================================================
-if "device_id" not in st.session_state:
-    st.session_state.device_id = None
-
-device_id = st.session_state.device_id
-
-# =====================================================
-# 🔐 替换后的自动登录逻辑
+# 🔐 自动登录判定（URL 持久登录）
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
-if "trusted_devices" not in data:
-    data["trusted_devices"] = {}
+query_uid = st.query_params.get("uid")
 
-device_id = st.session_state.get("device_id")
-
-if device_id:
-    trusted_uid = data["trusted_devices"].get(device_id)
-
-    if trusted_uid:
-        st.session_state.logged_in_uid = trusted_uid
+if query_uid and not st.session_state.logged_in_uid:
+    st.session_state.logged_in_uid = query_uid
 
 # =====================================================
 # 登录门户界面
@@ -294,23 +278,9 @@ if not st.session_state.logged_in_uid:
             if info["login_id"] == login_id and info["password"] == pwd:
                 matched_uid = uid
                 break
-        
-        # 替换后的登录成功后绑定设备逻辑
         if matched_uid:
-            # 首次登录生成设备ID
-            if not st.session_state.device_id:
-                st.session_state.device_id = str(uuid.uuid4())
-
-            device_id = st.session_state.device_id
-
-            # 保存设备绑定
-            if "trusted_devices" not in data:
-                data["trusted_devices"] = {}
-
-            data["trusted_devices"][device_id] = matched_uid
-
-            save_data(data)
-
+            # URL 持久登录（iPhone 永久稳定）
+            st.query_params["uid"] = matched_uid
             st.session_state.logged_in_uid = matched_uid
             st.rerun()
         else:
@@ -320,20 +290,13 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 🛡️ 替换后的退出登录逻辑
+# 🛡️ 退出登录逻辑（同步清除内存与 Cookie 锁）
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
 def execute_logout():
-    if "trusted_devices" in data:
-        device_id = st.session_state.get("device_id")
-
-        if device_id in data["trusted_devices"]:
-            del data["trusted_devices"][device_id]
-
-        save_data(data)
-
+    st.query_params.clear()
     st.session_state.logged_in_uid = None
     st.rerun()
 
@@ -430,18 +393,23 @@ def render_live_system():
     # 🏆 每周一零点过后 自动结算机制
     # =====================================================
     now_dt = get_china_now()
+    # 生成当前年份与 ISO 周号 (例如: "2026-W21")
     current_week_id = f"{now_dt.year}-W{now_dt.isocalendar()[1]}"
     
     if "last_settled_week" not in data:
+        # 初次部署初始化，标记本周为已结算，防止初次加载时误补发旧积分
         data["last_settled_week"] = current_week_id
         save_data(data)
     elif data["last_settled_week"] != current_week_id:
+        # 进入了新的一周！结算上周（即过去 7 天内）的累积时长
         c_hours = get_week_study_hours(current_uid)
         t_hours = get_week_study_hours(target_uid)
         
+        # 只有在有人学过习的情况下才结算
         if c_hours > 0 or t_hours > 0:
             time_str = now_dt.strftime('%m-%d %H:%M')
             if c_hours == t_hours:
+                # 极其罕见的浪漫平局情况：两人均加 10 分
                 data["points"][current_uid] += 10
                 data["points"][target_uid] += 10
                 settle_log = f"**{time_str}** | 🏆 **每周结算**：**{current_name}** 与 **{target_name}** 本周学时完美并列！触发双赢奖励 <span style='color:#ff758c; font-weight:bold;'>(各自+10分)</span>"
@@ -454,6 +422,7 @@ def render_live_system():
             data["logs"].insert(0, settle_log)
             data["logs"] = data["logs"][:MAX_LOGS]
         
+        # 更新周标签并同步云端，确保本周不会重复结算
         data["last_settled_week"] = current_week_id
         save_data(data)
 
