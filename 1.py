@@ -323,7 +323,7 @@ if not st.session_state.logged_in_uid:
         pwd = st.text_input("密码 / Password", type="password", placeholder="输入密码...")
 
         st.write("")
-        if st.button("✨ 立即登录确认", type="primary"):
+        if st.button("✨ 登录", type="primary"):
             matched_uid = None
             for uid, info in data["accounts"].items():
                 if info["login_id"] == login_id and info["password"] == pwd:
