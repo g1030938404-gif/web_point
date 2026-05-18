@@ -389,6 +389,43 @@ def render_live_system():
         now_prefix = f"**{get_china_now().strftime('%m-')}"
         return sum(float(log.split("color:#ff758c; font-weight:bold;'>(+")[-1].split("分)")[0]) for log in data["logs"] if data["accounts"][uid]["display_name"] in log and now_prefix in log and "(+" in log)
 
+    # =====================================================
+    # 🏆 每周一零点过后 自动结算机制
+    # =====================================================
+    now_dt = get_china_now()
+    # 生成当前年份与 ISO 周号 (例如: "2026-W21")
+    current_week_id = f"{now_dt.year}-W{now_dt.isocalendar()[1]}"
+    
+    if "last_settled_week" not in data:
+        # 初次部署初始化，标记本周为已结算，防止初次加载时误补发旧积分
+        data["last_settled_week"] = current_week_id
+        save_data(data)
+    elif data["last_settled_week"] != current_week_id:
+        # 进入了新的一周！结算上周（即过去 7 天内）的累积时长
+        c_hours = get_week_study_hours(current_uid)
+        t_hours = get_week_study_hours(target_uid)
+        
+        # 只有在有人学过习的情况下才结算
+        if c_hours > 0 or t_hours > 0:
+            time_str = now_dt.strftime('%m-%d %H:%M')
+            if c_hours == t_hours:
+                # 极其罕见的浪漫平局情况：两人均加 10 分
+                data["points"][current_uid] += 10
+                data["points"][target_uid] += 10
+                settle_log = f"**{time_str}** | 🏆 **每周结算**：**{current_name}** 与 **{target_name}** 本周学时完美并列！触发双赢奖励 <span style='color:#ff758c; font-weight:bold;'>(各自+10分)</span>"
+            else:
+                winner_uid = current_uid if c_hours > t_hours else target_uid
+                winner_name = current_name if c_hours > t_hours else target_name
+                data["points"][winner_uid] += 10
+                settle_log = f"**{time_str}** | 🏆 **每周结算**：**{winner_name}** 凭本周超强毅力荣获学习 MVP！奖励已到账 <span style='color:#ff758c; font-weight:bold;'>(+10分)</span>"
+            
+            data["logs"].insert(0, settle_log)
+            data["logs"] = data["logs"][:MAX_LOGS]
+        
+        # 更新周标签并同步云端，确保本周不会重复结算
+        data["last_settled_week"] = current_week_id
+        save_data(data)
+
     # 浪漫 Banner
     love_start = datetime(2022, 8, 13)
     love_days = (get_china_now() - love_start).days
@@ -420,16 +457,26 @@ def render_live_system():
         </div>
         """, unsafe_allow_html=True)
 
-    # 学习成就榜
-    c1, c2, c3 = st.columns(3)
-    mvp_name = current_name if get_month_points(current_uid) >= get_month_points(target_uid) else target_name
+    # =====================================================
+    # 实时 MVP 称号展现计算
+    # =====================================================
+    c_week_hours = get_week_study_hours(current_uid)
+    t_week_hours = get_week_study_hours(target_uid)
+    if c_week_hours == 0 and t_week_hours == 0:
+        mvp_name = "暂无 💤"
+    elif c_week_hours == t_week_hours:
+        mvp_name = "并列中 🤝"
+    else:
+        mvp_name = current_name if c_week_hours > t_week_hours else target_name
 
+    # 学习成就榜展示
+    c1, c2, c3 = st.columns(3)
     with c1: 
-        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {get_week_study_hours(current_uid)}h</small><br><small style="color:#2980b9;">{target_name}: {get_week_study_hours(target_uid)}h</small></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">⏳ <b>本周时长</b><br><small style="color:#e74c3c;">{current_name}: {c_week_hours}h</small><br><small style="color:#2980b9;">{target_name}: {t_week_hours}h</small></div>', unsafe_allow_html=True)
     with c2: 
         st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🔥 <b>连续打卡</b><br><small style="color:#e74c3c;">{current_name}: {get_streak_days(current_uid)}天</small><br><small style="color:#2980b9;">{target_name}: {get_streak_days(target_uid)}天</small></div>', unsafe_allow_html=True)
     with c3: 
-        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🏆 <b>本月 MVP</b><br><h3 style="margin:8px 0 0 0; color:#f39c12; font-size:1.2rem;">{mvp_name}</h3></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card" style="text-align:center; padding:15px; min-height:110px;">🏆 <b>本周 MVP</b><br><h3 style="margin:8px 0 0 0; color:#f39c12; font-size:1.2rem;">{mvp_name}</h3></div>', unsafe_allow_html=True)
 
     # 选项卡功能区
     st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
@@ -558,8 +605,8 @@ def render_live_system():
 
     # --- Tab 3 悬赏 ---
     with tab3:
-        c_pub, c_list = st.columns([1, 1.2])
-        with c_pub:
+        box_pub, box_list = st.columns([1, 1.2])
+        with box_pub:
             st.markdown('<div class="glass-card">', unsafe_allow_html=True)
             st.subheader(f"🎯 悬赏 {target_name}")
             b_title = st.text_input("指派任务：")
@@ -571,7 +618,7 @@ def render_live_system():
                 st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
 
-        with c_list:
+        with box_list:
             st.markdown('<div class="glass-card" style="max-height: 400px; overflow-y: auto;">', unsafe_allow_html=True)
             my_b = [b for b in data["bounties"] if b["target"] == current_uid and b["status"] == "open"]
             st.write("📜 **待我完成：**")
@@ -591,8 +638,7 @@ def render_live_system():
                         st.rerun()
             st.divider()
             
-            pending = [b for b in data["bounties"] 
-                       if b["creator"] == current_uid and b["status"] == "pending"]
+            pending = [b for b in data["bounties"] if b["creator"] == current_uid and b["status"] == "pending"]
             st.write("✅ **待我审核：**")
             if not pending: st.caption("暂无待审核")
             for b in pending:
