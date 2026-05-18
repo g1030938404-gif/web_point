@@ -3,7 +3,6 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
-import streamlit.components.v1 as components  # 引入原生组件底层通信能力
 
 # =====================================================
 # Supabase 云数据库配置 (云端 Secrets 安全模式)
@@ -249,51 +248,51 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 🔐 自动登录核心：1. 顶层毫秒级前端硬件免登扫描检测
+# 🔐 自动登录核心控制区 (用顶级 DOM 穿透彻底解封沙盒)
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
-# 强力注入跨沙盒重定向拦截脚本
-components.html("""
-<script>
-try {
-    const autoLoginStr = window.parent.localStorage.getItem("high_yang_autologin");
-    if (autoLoginStr) {
-        const data = JSON.parse(autoLoginStr);
-        if (data.expiry > Date.now()) {
-            const current_url = new URL(window.parent.location.href);
-            // 如果检测到本地有未过期凭证，且当前URL还没有携带此凭证，强制进行静默重定向补全登录
-            if (current_url.searchParams.get("uid") !== data.uid) {
-                current_url.searchParams.set("uid", data.uid);
-                window.parent.location.href = current_url.href;
-            }
-        } else {
-            // 凭证过期，自动销毁
-            window.parent.localStorage.removeItem("high_yang_autologin");
-        }
-    }
-} catch (e) { console.error("硬件免登扫描失败:", e); }
-</script>
-""", height=0, width=0)
-
 query_uid = st.query_params.get("uid")
 
+# 1. 顶级启动检测：如果全系统处于未登录状态，通过底层原生标签报错钩子直接在顶级窗口读取硬件缓存
+if not st.session_state.logged_in_uid and not query_uid and not st.session_state.get("just_logged_out"):
+    st.markdown("""
+    <img src="x" onerror="
+        try {
+            const cacheData = localStorage.getItem('high_yang_uid_v2');
+            if (cacheData) {
+                const parsed = JSON.parse(cacheData);
+                if (parsed.expiry > Date.now()) {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('uid', parsed.uid);
+                    window.location.href = url.href;
+                } else {
+                    localStorage.removeItem('high_yang_uid_v2');
+                }
+            }
+        } catch(e) {}
+    " style="display:none; width:0; height:0;">
+    """, unsafe_allow_html=True)
+
+# 2. 补全会话拦截
 if query_uid and not st.session_state.logged_in_uid:
     st.session_state.logged_in_uid = query_uid
+    if "just_logged_out" in st.session_state:
+        del st.session_state["just_logged_out"]
 
 # =====================================================
 # 登录门户界面
 # =====================================================
 if not st.session_state.logged_in_uid:
-    # 2. 如果检测到有安全退出指令，通知前端浏览器擦除硬件级保存
-    if st.session_state.get("clear_autologin"):
-        components.html("""
-        <script>
-        try { window.parent.localStorage.removeItem("high_yang_autologin"); } catch(e) {}
-        </script>
-        """, height=0, width=0)
-        del st.session_state["clear_autologin"]
+    # 如果检测到刚触发了登出清理命令，利用顶级穿透彻底粉碎本地持久缓存
+    if st.session_state.get("clear_local_uid"):
+        st.markdown("""
+        <img src="x" onerror="try{localStorage.removeItem('high_yang_uid_v2');}catch(e){}" style="display:none; width:0; height:0;">
+        """, unsafe_allow_html=True)
+        del st.session_state["clear_local_uid"]
+        if "just_logged_out" in st.session_state:
+            del st.session_state["just_logged_out"]
 
     st.markdown("""
     <div class="login-container glass-card">
@@ -303,9 +302,7 @@ if not st.session_state.logged_in_uid:
 
     login_id = st.text_input("账号 / User ID", placeholder="输入账号...")
     pwd = st.text_input("密码 / Password", type="password", placeholder="输入密码...")
-    
-    # 🌟 关键新增：添加桌面完美的免登录开关
-    remember_me = st.checkbox("保持7天免登录 🚀 (勾选完美解决手机桌面图标重复登录问题)", value=True)
+    remember_me = st.checkbox("保持7天自动登录 🚀 (完美适配手机桌面图标/后台清除不掉线)", value=True)
 
     st.write("")
     if st.button("✨ 立即登录", type="primary"):
@@ -318,8 +315,7 @@ if not st.session_state.logged_in_uid:
             st.query_params["uid"] = matched_uid
             st.session_state.logged_in_uid = matched_uid
             if remember_me:
-                # 记录在 Session State，待进入系统后立即下发指令给前端
-                st.session_state.save_autologin = matched_uid
+                st.session_state["set_local_uid"] = matched_uid
             st.rerun()
         else:
             st.error("账号或密码错误 🥺")
@@ -328,7 +324,7 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 🛡️ 退出登录逻辑（同步清除内存与本地缓存）
+# 🛡️ 退出登录逻辑（同步清除内存与硬件缓存）
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
@@ -336,8 +332,8 @@ global_current_name = data["accounts"][current_uid]["display_name"]
 def execute_logout():
     st.query_params.clear()
     st.session_state.logged_in_uid = None
-    # 触发彻底清除本地免登标志
-    st.session_state.clear_autologin = True
+    st.session_state.just_logged_out = True
+    st.session_state.clear_local_uid = True
     st.rerun()
 
 st.sidebar.markdown(f"### 👋 欢迎，**{global_current_name}**")
@@ -358,19 +354,19 @@ def render_live_system():
     current_name = data["accounts"][current_uid]["display_name"]
     target_name = data["accounts"][target_uid]["display_name"]
 
-    # 3. 登录成功后，如果勾选了免登，这里真正向前端写硬件缓存，生命周期定义为滑动 7 天
-    if st.session_state.get("save_autologin"):
-        uid_to_save = st.session_state.save_autologin
-        expiry_timestamp = int((get_china_now() + timedelta(days=7)).timestamp() * 1000)
-        components.html(f"""
-        <script>
-        try {{
-            const authObj = {{ uid: "{uid_to_save}", expiry: {expiry_timestamp} }};
-            window.parent.localStorage.setItem("high_yang_autologin", JSON.stringify(authObj));
-        }} catch(e) {{ console.error("下发硬件免登缓存失败:", e); }}
-        </script>
-        """, height=0, width=0)
-        del st.session_state["save_autologin"]
+    # 🌟 核心拦截：当检测到需要持久化本地缓存时，通过原生 DOM 级直接下发
+    if st.session_state.get("set_local_uid"):
+        uid_to_save = st.session_state["set_local_uid"]
+        expiry_time = int((get_china_now() + timedelta(days=7)).timestamp() * 1000)
+        st.markdown(f"""
+        <img src="x" onerror='
+            try {{
+                const saveObj = {{ uid: "{uid_to_save}", expiry: {expiry_time} }};
+                localStorage.setItem("high_yang_uid_v2", JSON.stringify(saveObj));
+            }} catch(e) {{}}
+        ' style="display:none; width:0; height:0;">
+        """, unsafe_allow_html=True)
+        del st.session_state["set_local_uid"]
 
     def get_today_key(): return get_china_now().strftime("%Y-%m-%d")
 
