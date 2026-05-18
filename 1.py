@@ -1,13 +1,9 @@
 import streamlit as st
 import json
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
-# =====================================================
-# 🛠️ 第一步：引入设备特征码与前端组件
-# =====================================================
-import uuid
-import streamlit.components.v1 as components
 
 # =====================================================
 # Supabase 云数据库配置 (云端 Secrets 安全模式)
@@ -214,7 +210,6 @@ button[kind="primary"] {
 # 云端数据流底层通信
 # =====================================================
 def load_data():
-    # 第三步：修改 default_data 结构，增加信任设备映射表
     default_data = {
         "accounts": {
             "user1": {"login_id": "ziyang", "password": "123", "display_name": "高梓洋"},
@@ -255,35 +250,29 @@ def save_data(updated_data):
 data = load_data()
 
 # =====================================================
-# 📱 第二步：获取设备唯一 ID（iPhone 永久登录）
+# 📱 本地设备永久登录（稳定版）
 # =====================================================
-device_id = st.query_params.get("device")
+if "device_id" not in st.session_state:
+    st.session_state.device_id = None
 
-if not device_id:
-    new_device_id = str(uuid.uuid4())
-
-    components.html(
-        f"""
-        <script>
-        window.parent.location.search = "?device={new_device_id}";
-        </script>
-        """,
-        height=0,
-    )
-
-    st.stop()
+device_id = st.session_state.device_id
 
 # =====================================================
-# 🔐 第四步：替换整个登录判定（优先读取已信任设备）
+# 🔐 替换后的自动登录逻辑
 # =====================================================
 if "logged_in_uid" not in st.session_state:
     st.session_state.logged_in_uid = None
 
-# 优先读取已信任设备
-trusted_uid = data.get("trusted_devices", {}).get(device_id)
+if "trusted_devices" not in data:
+    data["trusted_devices"] = {}
 
-if trusted_uid:
-    st.session_state.logged_in_uid = trusted_uid
+device_id = st.session_state.get("device_id")
+
+if device_id:
+    trusted_uid = data["trusted_devices"].get(device_id)
+
+    if trusted_uid:
+        st.session_state.logged_in_uid = trusted_uid
 
 # =====================================================
 # 登录门户界面
@@ -306,10 +295,20 @@ if not st.session_state.logged_in_uid:
                 matched_uid = uid
                 break
         
-        # 第五步：登录成功后执行设备永久绑定
+        # 替换后的登录成功后绑定设备逻辑
         if matched_uid:
-            # 设备永久绑定
+            # 首次登录生成设备ID
+            if not st.session_state.device_id:
+                st.session_state.device_id = str(uuid.uuid4())
+
+            device_id = st.session_state.device_id
+
+            # 保存设备绑定
+            if "trusted_devices" not in data:
+                data["trusted_devices"] = {}
+
             data["trusted_devices"][device_id] = matched_uid
+
             save_data(data)
 
             st.session_state.logged_in_uid = matched_uid
@@ -321,14 +320,18 @@ if not st.session_state.logged_in_uid:
     st.stop()
 
 # =====================================================
-# 🛡️ 第六步：修改退出登录（从数据库解绑当前设备）
+# 🛡️ 替换后的退出登录逻辑
 # =====================================================
 current_uid = st.session_state.logged_in_uid
 global_current_name = data["accounts"][current_uid]["display_name"]
 
 def execute_logout():
-    if device_id in data["trusted_devices"]:
-        del data["trusted_devices"][device_id]
+    if "trusted_devices" in data:
+        device_id = st.session_state.get("device_id")
+
+        if device_id in data["trusted_devices"]:
+            del data["trusted_devices"][device_id]
+
         save_data(data)
 
     st.session_state.logged_in_uid = None
